@@ -77,7 +77,7 @@ class digiBaseRH:
         if r[0] == 4 and r[1] == 0x80:
             # Firmware configuration needed - write a START2 packet
             self.send_command(b'\x04\x00\x02\x00', init=True)
-            log.info('Loading firmware')
+            self.log.info('Loading firmware')
             with open('./digiBaseRH.rbf', 'rb') as f:
                 fw = f.read()
             for page in (fw[:61424], fw[61424:75463]):
@@ -153,7 +153,7 @@ class digiBaseRH:
 
     @property
     def spectrum(self):
-        resp = self.send_command(b'\x80', max_length=4096)
+        resp = self.send_command(b'\x80', max_length=5000)
         return unpack('1024I', resp)
 
     def enable_hv(self):
