@@ -206,10 +206,16 @@ class digiBaseRH:
 
 if __name__ == "__main__":
     from argparse import ArgumentParser
+    from time import sleep
+    import numpy as np
+    
     parser = ArgumentParser(prog='digibase.py', description='Interface to ORTEC/AMETEK digiBase')
+    parser.add_argument('--output')
     parser.add_argument('-f', '--firmware', default='digiBaseRH.rbf')
     parser.add_argument('-L', '--log-level', nargs='?', default='WARNING', const='INFO')
     parser.add_argument('--force-reload', action='store_true')
+    parser.add_argument('-t', '--acq-time', type=float, default=10.0)
+    parser.add_argument('-b', '--background')
 
     args = parser.parse_args()
 
@@ -217,3 +223,27 @@ if __name__ == "__main__":
     log = logging.getLogger()
 
     base = digiBaseRH()
+    base.hv = 800
+    base.enable_hv()
+    sleep(1.0)
+    base.start()
+    if args.background is not None:
+    #    with open(args.background, 'rt') as f:
+    #        line = f.readline()
+    #        bkg_interval = float(line[6:])
+        bkg = np.loadtxt(args.background)
+        for i in range(10):
+            s = np.array(base.spectrum, dtype=np.int32)
+            diff = s - bkg
+            print(f'Counts {np.sum(diff[27:36])}')
+            base.clear_spectrum()
+            sleep(args.acq_time)
+    else:
+        sleep(args.acq_time)
+    base.stop()
+    base.disable_hv()
+    s = np.array(base.spectrum, dtype=np.int32)
+
+    #with open(args.output, 'wt') as f:
+    #    f.write(f'# INT {args.acq_time:.3f}')
+    np.savetxt(args.output, s, fmt='%d')
