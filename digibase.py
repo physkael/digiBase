@@ -4,6 +4,10 @@ import usb.core
 import usb.util
 from array import array
 import sys
+from argparse import ArgumentParser
+from time import sleep
+from datetime import datetime, timedelta
+import numpy as np
 from struct import pack, unpack
 import logging
 
@@ -204,46 +208,70 @@ class digiBaseRH:
         self._sreg &= ~1
         self.write_status_register()
 
-if __name__ == "__main__":
-    from argparse import ArgumentParser
-    from time import sleep
-    import numpy as np
-    
-    parser = ArgumentParser(prog='digibase.py', description='Interface to ORTEC/AMETEK digiBase')
-    parser.add_argument('--output')
-    parser.add_argument('-f', '--firmware', default='digiBaseRH.rbf')
-    parser.add_argument('-L', '--log-level', nargs='?', default='WARNING', const='INFO')
-    parser.add_argument('--force-reload', action='store_true')
-    parser.add_argument('-t', '--acq-time', type=float, default=10.0)
-    parser.add_argument('-b', '--background')
+def write_background(filename, s:np.ndarray, exposure:float, comment:str):
+    with open(filename, 'wb') as f:
+        f.write(b'DBKG\x00\x00\x00\x00')
+        f.write(pack('d', datetime.now().timestamp()))
+        f.write(pack('d', exposure))
+        f.write(comment.encode('utf-8')[:63].ljust(64, b'\x00'))
+        s.tofile(f)
 
+def read_background(filename) -> tuple[np.ndarray, float, float, str]:
+    with open(filename, 'rb') as f:
+        if f.read(8) != b'DBKG\x00\x00\x00\x00': raise ValueError("Unknown file format")
+        t, exp = unpack('2d', f.read(16))
+        comment = f.read(64).decode('utf-8')
+        s = np.fromfile(f, dtype=np.int32)
+        return s, t, exp, comment
+    
+if __name__ == "__main__":
+    
+    parser = ArgumentParser(prog='digibase.py', description='Simple DAQ for ORTEC/AMETEK digiBase')
+    parser.add_argument('--pmt-hv', type=int, default=800)
+    parser.add_argument('-L', '--log-level', nargs='?', default='WARNING', const='INFO')
+
+    subparsers = parser.add_subparsers(dest='command', help='Available commands: spect | detect')
+    parser_spe = subparsers.add_parser('spect', help='Acquire spectrum, write to file')
+    parser_spe.add_argument('duration', type=float, help='Time, in seconds to integrate spectrum')
+    parser_spe.add_argument('filename', help='Output file in which spectrum is saved')
+    parser_spe.add_argument('-m', '--comment', help='Short run description (max 63 char)')
+
+    parser_det = subparsers.add_parser('detect', help='Detect presence of signal over background')
+    parser_det.add_argument('duration', type=float, help='Integration time of each query interval')
+    parser_det.add_argument('n', type=int, help='Number of intervals')
+    parser_det.add_argument('filename', help='Spectrum file for background subtraction')
+    parser_det.add_argument('sig0', type=int, help='Channel # of low side of signal RoI')
+    parser_det.add_argument('sig1', type=int, help='Channel # of high side of signal RoI')
+    parser_det.add_argument('-a', '--alpha', type=float, help='Exponential Moving Average parameter.')
+    
     args = parser.parse_args()
 
     logging.basicConfig(level=args.log_level)
     log = logging.getLogger()
 
     base = digiBaseRH()
-    base.hv = 800
+    base.hv = args.pmt_hv
     base.enable_hv()
     sleep(1.0)
     base.start()
-    if args.background is not None:
-    #    with open(args.background, 'rt') as f:
-    #        line = f.readline()
-    #        bkg_interval = float(line[6:])
-        bkg = np.loadtxt(args.background)
-        for i in range(10):
-            s = np.array(base.spectrum, dtype=np.int32)
-            diff = s - bkg
-            print(f'Counts {np.sum(diff[27:36])}')
-            base.clear_spectrum()
-            sleep(args.acq_time)
-    else:
-        sleep(args.acq_time)
+
+    if args.command == 'spect':
+        sleep(args.duration)
+        spectrum = np.array(base.spectrum, dtype=np.int32)
+        write_background(args.filename, spectrum, args.duration, args.comment)
+    elif args.command == 'detect':
+        bkg, t_bkg, exp_bkg, comment = read_background(args.filename)
+        bkg = bkg * args.duration / exp_bkg
+        spectrum_last = np.zeros(1024, dtype=np.int32)
+        counts = None
+        for i in range(args.n):
+            sleep(args.duration)
+            spectrum = np.array(base.spectrum, dtype=np.int32)
+            spectrum_diff = spectrum - spectrum_last
+            bkg_sub = spectrum_diff - bkg
+            c = np.sum(bkg_sub[args.sig0:args.sig1])
+            counts = c if counts is None else c*args.alpha + counts*(1-args.alpha)
+            print(datetime.now(), '-', f'counts {counts}')
+
     base.stop()
     base.disable_hv()
-    s = np.array(base.spectrum, dtype=np.int32)
-
-    #with open(args.output, 'wt') as f:
-    #    f.write(f'# INT {args.acq_time:.3f}')
-    np.savetxt(args.output, s, fmt='%d')
