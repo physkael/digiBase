@@ -136,6 +136,13 @@ class digiBaseRH:
     def clear_spectrum(self):
         self.send_command(b'\x02' + b'\x00'*4096)
 
+    def clear_counters(self):
+        "Clear livetime and realtime counters"
+        self._sreg |= (1 << 608)
+        self.write_status_register()
+        self._sreg &= ~(1 << 608)
+        self.write_status_register()
+
     def send_command(self, cmd, init:bool=False, max_length:int=80):
         epID = (0x01, 0x81) if init else (0x08, 0x82)
         n = self.dev.write(epID[0], cmd, timeout=1000)
@@ -154,6 +161,16 @@ class digiBaseRH:
         "Stop the acquisition"
         self._sreg &= ~(1 << 1)
         self.write_status_register()
+
+    @property
+    def livetime(self):
+        self.read_status_register()
+        return (self._sreg >> 224) & 0xffff_ffff
+    
+    @property
+    def realtime(self):
+        self.read_status_register()
+        return (self._sreg >> 288) & 0xffff_ffff
 
     @property
     def spectrum(self):
@@ -177,6 +194,7 @@ class digiBaseRH:
     
     @hv.setter
     def hv(self, val):
+        val = int(val)
         if val >= 1200: raise ValueError(f"{val} > Max HV 1200V")
         val = (val * 4) // 5
         self._sreg &= ~(0xffff << 336)
@@ -199,6 +217,32 @@ class digiBaseRH:
     def hv_readback(self):
         self.read_status_register()
         return (self._sreg >> 24) & 0xffff
+    
+    @property
+    def lld(self):
+        "Lower level discriminator"
+        self.read_status_register()
+        return (self._sreg >> 160) & 0xffff
+    
+    @lld.setter
+    def lld(self, val):
+        val &= 0xffff
+        self._sreg &= ~(0xffff << 160)
+        self._sreg |= (val << 160)
+        self.write_status_register()
+    
+    @property
+    def uld(self):
+        "Upper level discriminator"
+        self.read_status_register()
+        return (self._sreg >> 176) & 0xffff
+    
+    @uld.setter
+    def uld(self, val):
+        val &= 0xffff
+        self._sreg &= ~(0xffff << 176)
+        self._sreg |= (val << 176)
+        self.write_status_register()
     
     def set_acq_mode_list(self):
         self._sreg |= 1
