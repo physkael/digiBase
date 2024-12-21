@@ -163,6 +163,13 @@ class digiBaseRH:
         self.write_status_register()
 
     @property
+    def SREG(self):
+        srbytes = array('B', self._sreg.to_bytes(80, byteorder='little'))
+        for (i, a) in enumerate(srbytes):
+            print(f'{a:02x}', end=' ')
+            if i%16 == 15: print(' ')
+
+    @property
     def livetime(self):
         self.read_status_register()
         return (self._sreg >> 224) & 0xffff_ffff
@@ -222,13 +229,13 @@ class digiBaseRH:
     def lld(self):
         "Lower level discriminator"
         self.read_status_register()
-        return (self._sreg >> 160) & 0xffff
+        return (self._sreg >> 168) & 0xff
     
     @lld.setter
     def lld(self, val):
-        val &= 0xffff
-        self._sreg &= ~(0xffff << 160)
-        self._sreg |= (val << 160)
+        val &= 0xff
+        self._sreg &= ~(0xff << 168)
+        self._sreg |= (val << 168)
         self.write_status_register()
     
     @property
@@ -272,6 +279,8 @@ if __name__ == "__main__":
     
     parser = ArgumentParser(prog='digibase.py', description='Simple DAQ for ORTEC/AMETEK digiBase')
     parser.add_argument('--pmt-hv', type=int, default=800)
+    parser.add_argument('--disc', type=int, default=0)
+
     parser.add_argument('-L', '--log-level', nargs='?', default='WARNING', const='INFO')
 
     subparsers = parser.add_subparsers(dest='command', help='Available commands: spect | detect')
@@ -294,6 +303,13 @@ if __name__ == "__main__":
     log = logging.getLogger()
 
     base = digiBaseRH()
+    
+    # The device holds state
+    base.clear_spectrum()
+    base.clear_counters()
+
+    if args.disc > 0:
+        base.lld = args.disc
     base.hv = args.pmt_hv
     base.enable_hv()
     sleep(1.0)
@@ -313,9 +329,10 @@ if __name__ == "__main__":
             spectrum = np.array(base.spectrum, dtype=np.int32)
             spectrum_diff = spectrum - spectrum_last
             bkg_sub = spectrum_diff - bkg
+            spectrum_last = spectrum
             c = np.sum(bkg_sub[args.sig0:args.sig1])
             counts = c if counts is None else c*args.alpha + counts*(1-args.alpha)
-            print(datetime.now(), '-', f'counts {counts}')
+            print(datetime.now(), '-', f'counts {counts:.1f}')
 
     base.stop()
     base.disable_hv()
