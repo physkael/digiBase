@@ -57,16 +57,38 @@ STAT_4 = b'\x00\x31\x00\x0c\x20\x00\x30\x20' + \
          b'\x00\x00\x00\x9e\x00\x85\x00\x6c' + \
          b'\x00\x40\x00\x00\x00\x04\x0c\x24\x00'
 
+class bit_register:
+    def __init__(self, val=0):
+        self.reg = val
+
+    def __getitem__(self, idx):
+        if isinstance(idx, int):
+            return (self.reg >> idx) & 1
+        if isinstance(idx, slice):
+            len = idx.stop - idx.start
+            mask = (1 << len) - 1
+            return (self.reg >> idx.start) & mask
+        
+    def __setitem__(self, idx, val):
+        if isinstance(idx, int):
+            mask = 1 << idx
+            self.reg = (self.reg & ~mask) | (val << idx)
+        if isinstance(idx, slice):
+            len = idx.stop - idx.start
+            mask = (1 << len) - 1
+            self.reg = (self.reg & ~(mask << idx.start)) | (val << idx.start)
+
 class digiBaseRH:
     VENDOR_ID: int  = 0x0a2d
     PRODUCT_ID: int = 0x001f
 
-    def __init__(self, serial_number: int=None):
+    def __init__(self):
 
         self.log = logging.getLogger('digiBaseRH')
         self.dev = usb.core.find(
             idVendor=digiBaseRH.VENDOR_ID, 
-            idProduct=digiBaseRH.PRODUCT_ID
+            idProduct=digiBaseRH.PRODUCT_ID,
+
         )
         if self.dev is None: raise ValueError("Device not found")
 
@@ -108,28 +130,29 @@ class digiBaseRH:
             self.read_status_register()
         elif r[0] == 0 and r[1] == 0:
             # No firmware config - get config 3x
-            for i in range(3):
-                self.read_status_register()
+            self.read_status_register()
                 
-            r = self.send_command(b'\x12\x00\x06\x00', init=True)
-            self.log.debug('End of Init Message: ' + str(r))
+            #r = self.send_command(b'\x12\x00\x06\x00', init=True)
+            #self.log.debug('End of Init Message: ' + str(r))
             
             # Set CNT byte
-            self._sreg &= ~(1 << 610)
+            self._status[610] = 0
             self.write_status_register()
-            self._sreg |= (1 << 610)
+            self._status[610] = 1
             self.write_status_register()
             self.read_status_register()
         
     def read_status_register(self):
-        self._sreg = int.from_bytes(
-            self.send_command(b'\x01', init=False), 
-            byteorder='little'
+        self._status = bit_register(
+            int.from_bytes(
+                self.send_command(b'\x01', init=False), 
+                byteorder='little'
+            )
         )
 
     def write_status_register(self):
         resp = self.send_command(
-            b'\x00' + self._sreg.to_bytes(80, byteorder='little')
+            b'\x00' + self._status.reg.to_bytes(80, byteorder='little')
         )
         assert len(resp) == 0
 
@@ -138,9 +161,9 @@ class digiBaseRH:
 
     def clear_counters(self):
         "Clear livetime and realtime counters"
-        self._sreg |= (1 << 608)
+        self._status[608] = 1
         self.write_status_register()
-        self._sreg &= ~(1 << 608)
+        self._status[608] = 0
         self.write_status_register()
 
     def send_command(self, cmd, init:bool=False, max_length:int=80):
@@ -154,17 +177,16 @@ class digiBaseRH:
             
     def start(self):
         "Start the acquisition"
-        self._sreg |= 2
+        self._status[1] = 1
         self.write_status_register()
 
     def stop(self):
         "Stop the acquisition"
-        self._sreg &= ~(1 << 1)
+        self._status[1] = 0
         self.write_status_register()
 
-    @property
-    def SREG(self):
-        srbytes = array('B', self._sreg.to_bytes(80, byteorder='little'))
+    def print_status(self):
+        srbytes = array('B', self._status.reg.to_bytes(80, byteorder='little'))
         for (i, a) in enumerate(srbytes):
             print(f'{a:02x}', end=' ')
             if i%16 == 15: print(' ')
@@ -172,12 +194,12 @@ class digiBaseRH:
     @property
     def livetime(self):
         self.read_status_register()
-        return (self._sreg >> 224) & 0xffff_ffff
+        return self._status[224:256]
     
     @property
     def realtime(self):
         self.read_status_register()
-        return (self._sreg >> 288) & 0xffff_ffff
+        return self._status[288:320]
 
     @property
     def spectrum(self):
@@ -187,76 +209,73 @@ class digiBaseRH:
     def enable_hv(self):
         if self.hv > 1200: 
             raise ValueError(f"HV setting {self.hv} exceeds max value.")
-        self._sreg |= (1 << 6)
+        self._status[6] = 1
         self.write_status_register()
         
     def disable_hv(self):
-        self._sreg &= ~(1 << 6)
+        self._status[6] = 0
         self.write_status_register()
 
     @property
-    def hv(self):
+    def hv(self) -> float:
         self.read_status_register()
-        return ((self._sreg >> 336) & 0xffff) * 5 / 4
+        return self._status[336:352] * 5 / 4
     
     @hv.setter
     def hv(self, val):
         val = int(val)
         if val >= 1200: raise ValueError(f"{val} > Max HV 1200V")
         val = (val * 4) // 5
-        self._sreg &= ~(0xffff << 336)
-        self._sreg |= (val << 336)
+        self._status[336:352] = val
         self.write_status_register()
 
     @property
     def pw(self):
-        return 0.0625 * (((self._sreg >> 16) & 0xff) - 12) + 0.75
+        self.read_status_register()
+        return 0.0625 * (self._status[16:24] - 12) + 0.75
 
     @pw.setter
     def pw(self, val):
         if val < 0.75 or val > 2.0: raise ValueError("Pulse width out of range")
         val = 16 * (val - 0.75) + 12
-        self._sreg &= ~(0xff << 16)
-        self._sred |= (val << 16)
+        self._status[16:24] = val
         self.write_status_register()
 
     @property
     def hv_readback(self):
         self.read_status_register()
-        return (self._sreg >> 24) & 0xffff
+        return self._status[24:40]
     
     @property
     def lld(self):
         "Lower level discriminator"
         self.read_status_register()
-        return (self._sreg >> 168) & 0xff
+        return self._status[168:176]
     
     @lld.setter
     def lld(self, val):
         val &= 0xff
-        self._sreg &= ~(0xff << 168)
-        self._sreg |= (val << 168)
+        self._status[168:176] = val
         self.write_status_register()
     
     @property
     def uld(self):
         "Upper level discriminator"
         self.read_status_register()
-        return (self._sreg >> 176) & 0xffff
+        return self._status[176:192]
     
     @uld.setter
     def uld(self, val):
         val &= 0xffff
-        self._sreg &= ~(0xffff << 176)
-        self._sreg |= (val << 176)
+        self._status[176:192] = val
         self.write_status_register()
     
     def set_acq_mode_list(self):
-        self._sreg |= 1
+        self._status[0] = 1
         self.write_status_register()
 
     def set_acq_mode_pha(self):
-        self._sreg &= ~1
+        self._status[0] = 0
         self.write_status_register()
 
 def write_background(filename, s:np.ndarray, exposure:float, comment:str):
