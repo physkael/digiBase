@@ -57,6 +57,33 @@ STAT_4 = b'\x00\x31\x00\x0c\x20\x00\x30\x20' + \
          b'\x00\x00\x00\x9e\x00\x85\x00\x6c' + \
          b'\x00\x40\x00\x00\x00\x04\x0c\x24\x00'
 
+# For non-RH style bases - Q&D fix this 
+STAT_5 = {
+    1  : 0xbd,  3: 0x0c,  6: 0x30,  7: 0x20,  8: 0x03,
+    13 : 0x0a, 18: 0xb5, 19: 0xa9, 21: 0xb0, 22: 0x1e,
+    41 : 0xff, 42: 0x03, 43: 0x58, 44: 0x02, 57: 0xfa,
+    58 : 0x01, 59: 0xd5, 60: 0x01, 61: 0xb0, 62: 0x01,
+    66 : 0x80, 67: 0xfa, 68: 0x01, 69: 0xd5, 70: 0x01,
+    71 : 0xb0, 72: 0x01, 73: 0x40, 77: 0x10, 79: 0x2e,
+    80 : 0x0b
+}
+
+STAT_6 = {
+    1 : 0x3d,  3: 0x0c,  6: 0x30,  7: 0x20,  8: 0x03,
+    13: 0x0a, 18: 0xb5, 19: 0x29, 21: 0xb0, 22: 0x1e,
+    41: 0xff, 42: 0x03, 43: 0x58, 44: 0x02, 57: 0xfa,
+    58: 0x01, 59: 0xd5, 60: 0x01, 61: 0xb0, 62: 0x01,
+    67: 0xfa, 68: 0x01, 69: 0xd5, 70: 0x01, 71: 0xb0,
+    72: 0x01, 73: 0x40, 79: 0x2e, 80: 0x0b
+}
+
+def dict_to_status(dst):
+    status = array('B', [0]*80)
+    for key, val in dst.items():
+        status[key-1] = val
+    return status.tobytes()
+
+
 class bit_register:
     def __init__(self, val=0):
         self.reg = val
@@ -78,19 +105,17 @@ class bit_register:
             mask = (1 << len) - 1
             self.reg = (self.reg & ~(mask << idx.start)) | (val << idx.start)
 
-class digiBaseRH:
+class digiBase:
     VENDOR_ID: int  = 0x0a2d
-    PRODUCT_ID: int = 0x001f
 
     def __init__(self):
 
-        self.log = logging.getLogger('digiBaseRH')
-        self.dev = usb.core.find(
-            idVendor=digiBaseRH.VENDOR_ID, 
-            idProduct=digiBaseRH.PRODUCT_ID,
+        self.log = logging.getLogger('digiBase')
+        self.dev = usb.core.find(idVendor=digiBase.VENDOR_ID)
 
-        )
         if self.dev is None: raise ValueError("Device not found")
+        self.log.info(f'Found device {self.dev.idVendor:04x}:{self.dev.idProduct:04x}')
+        self.isRH = self.dev.idProduct == 0x001f
 
         self.dev.reset()
         self.dev.set_configuration()
@@ -98,43 +123,64 @@ class digiBaseRH:
         cfg = self.dev.get_active_configuration()
 
         # Determine whether device needs firmware bitstream 
-        # Write out a START (0x06, 0x00, 0x02, 0x00)
-        r = self.send_command(b'\x06\x00\x02\x00', init=True)
-        if r[0] == 4 and r[1] == 0x80:
-            # Firmware configuration needed - write a START2 packet
-            self.send_command(b'\x04\x00\x02\x00', init=True)
-            self.log.info('Loading firmware')
-            with open('./digiBaseRH.rbf', 'rb') as f:
-                fw = f.read()
-            for page in (fw[:61424], fw[61424:75463]):
-                self.send_command(b'\x05\x00\x02\x00' + page, init=True)
-            self.send_command(b'\x06\x00\x02\x00', init=True)
-            self.send_command(b'\x11\x00\x02\x00', init=True)
+        if self.isRH:
+            # Write out a START (0x06, 0x00, 0x02, 0x00)
+            r = self.send_command(b'\x06\x00\x02\x00', init=True)
+            needs_init = (r[0] == 4 and r[1] == 0x80)
+        else:
+            r = self.send_command(b'\x06')
+            needs_init = (r[0] == 0)
 
-            self.send_command(STAT_1)
-            self.send_command(STAT_2)
-            self.send_command(STAT_2)
-            self.send_command(b'\x04')
-            self.send_command(STAT_3)
-            self.send_command(STAT_2)
-            self.send_command(STAT_2)
+        if needs_init:
+            if self.isRH:
+                # Firmware configuration needed - write a START2 packet
+                self.send_command(b'\x04\x00\x02\x00', init=True)
+                self.log.info('Loading digiBase RH firmware')
+                with open('./digiBaseRH.rbf', 'rb') as f:
+                    fw = f.read()
+                for page in (fw[:61424], fw[61424:75463]):
+                    self.send_command(b'\x05\x00\x02\x00' + page, init=True)
+                self.send_command(b'\x06\x00\x02\x00', init=True)
+                self.send_command(b'\x11\x00\x02\x00', init=True)
+                # STATUS init
+                self.send_command(STAT_1)
+                self.send_command(STAT_2)
+                self.send_command(STAT_2)
+                self.send_command(b'\x04')
+                self.send_command(STAT_3)
+                self.send_command(STAT_2)
+                self.send_command(STAT_2)
+                # This may signal end of initialization
+                r = self.send_command(b'\x12\x00\x06\x00', init=True)
+                self.log.debug('End of Init Message: ' + str(r))
+                self.send_command(STAT_2)
+                self.send_command(STAT_4)
+            else:
+                self.send_command(b'\x04')
+                self.log.info('Loading firmware')
+                with open('./digiBase.rbf', 'rb') as f:
+                    fw = f.read()
+                self.send_command(b'\x05' + fw[0:61438])
+                self.send_command(b'\x05' + fw[61438:122877], no_read=True)
+                # Intentional NULL byte sent
+                self.send_command(b'', no_read=True)
+                self.send_command(b'\x05' + fw[122877:166965])
+                self.send_command(b'\x06')
+                self.send_command(b'\x00' + dict_to_status(STAT_5))
+                self.send_command(b'\x00' + dict_to_status(STAT_6))
+                STAT_6[77] = 1
+                self.send_command(b'\x00' + dict_to_status(STAT_6))
+                STAT_6[77] = 0
+                self.send_command(b'\x00' + dict_to_status(STAT_6))
+                STAT_6[1]  &= 0xf3
+                self.send_command(b'\x00' + dict_to_status(STAT_6))
+
             self.clear_spectrum()
-
-            # This may signal end of initialization
-            r = self.send_command(b'\x12\x00\x06\x00', init=True)
-            self.log.debug('End of Init Message: ' + str(r))
-
-            self.send_command(STAT_2)
-            self.send_command(STAT_4)
-
             self.read_status_register()
-        elif r[0] == 0 and r[1] == 0:
+        else:
             # No firmware config - get config 3x
             self.read_status_register()
-                
-            #r = self.send_command(b'\x12\x00\x06\x00', init=True)
-            #self.log.debug('End of Init Message: ' + str(r))
-            
+          
             # Set CNT byte
             self._status[610] = 0
             self.write_status_register()
@@ -154,7 +200,8 @@ class digiBaseRH:
         resp = self.send_command(
             b'\x00' + self._status.reg.to_bytes(80, byteorder='little')
         )
-        assert len(resp) == 0
+        return resp
+        #assert len(resp) == 0
 
     def clear_spectrum(self):
         self.send_command(b'\x02' + b'\x00'*4096)
@@ -166,11 +213,20 @@ class digiBaseRH:
         self._status[608] = 0
         self.write_status_register()
 
-    def send_command(self, cmd, init:bool=False, max_length:int=80):
-        epID = (0x01, 0x81) if init else (0x08, 0x82)
+    def send_command(
+            self, 
+            cmd, 
+            init:bool=False, 
+            max_length:int=80,
+            no_read=False):
+        if self.isRH:
+            epID = (0x01, 0x81) if init else (0x08, 0x82)
+        else:
+            epID = (0x02, 0x82)
         n = self.dev.write(epID[0], cmd, timeout=1000)
         self.log.debug(f"Wrote {n} bytes to endpoint {epID[0]:02x}")
         if n != len(cmd): raise IOError("Incomplete write")
+        if no_read: return array('B')
         resp = self.dev.read(epID[1], max_length, timeout=125)
         self.log.debug(f"Read {len(resp)} bytes from endpoint {epID[1]:02x}")
         return resp
@@ -205,6 +261,12 @@ class digiBaseRH:
     def spectrum(self):
         resp = self.send_command(b'\x80', max_length=5000)
         return unpack('1024I', resp)
+    
+    @property
+    def hits(self):
+        resp = self.send_command(b'\x80', max_length=16384)
+        n = len(resp) // 4
+        return unpack(f'{n}I', resp)
 
     def enable_hv(self):
         if self.hv > 1200: 
@@ -250,12 +312,12 @@ class digiBaseRH:
     def lld(self):
         "Lower level discriminator"
         self.read_status_register()
-        return self._status[168:176]
+        return self._status[170:180]
     
     @lld.setter
     def lld(self, val):
-        val &= 0xff
-        self._status[168:176] = val
+        val &= 0x3ff
+        self._status[170:180] = val
         self.write_status_register()
     
     @property
@@ -271,11 +333,16 @@ class digiBaseRH:
         self.write_status_register()
     
     def set_acq_mode_list(self):
-        self._status[0] = 1
+        self._status[0:2] = 0
+        self._status[7] = 1
+        self._status[608] = 1
+        self.write_status_register()
+        self._status[7] = 0
+        self._status[608] = 0
         self.write_status_register()
 
     def set_acq_mode_pha(self):
-        self._status[0] = 0
+        self._status[0] = 1
         self.write_status_register()
 
 def write_background(filename, s:np.ndarray, exposure:float, comment:str):
@@ -321,7 +388,7 @@ if __name__ == "__main__":
     logging.basicConfig(level=args.log_level)
     log = logging.getLogger()
 
-    base = digiBaseRH()
+    base = digiBase()
     
     # The device holds state
     base.clear_spectrum()
