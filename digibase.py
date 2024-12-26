@@ -114,7 +114,7 @@ class digiBase:
         self.dev = usb.core.find(idVendor=digiBase.VENDOR_ID)
 
         if self.dev is None: raise ValueError("Device not found")
-        self.log.info(f'Found device {self.dev.idVendor:04x}:{self.dev.idProduct:04x}')
+        self.log.info(f'Found ORTEC digiBase device {self.dev.idVendor:04x}:{self.dev.idProduct:04x}')
         self.isRH = self.dev.idProduct == 0x001f
 
         self.dev.reset()
@@ -160,25 +160,33 @@ class digiBase:
                 self.log.info('Loading firmware')
                 with open('./digiBase.rbf', 'rb') as f:
                     fw = f.read()
-                self.send_command(b'\x05' + fw[0:61438])
+                r = self.send_command(b'\x05' + fw[0:61438])
+                self.log.debug(f'FW1: {r[0]}')
                 self.send_command(b'\x05' + fw[61438:122877], no_read=True)
                 # Intentional NULL byte sent
-                self.send_command(b'', no_read=True)
-                self.send_command(b'\x05' + fw[122877:166965])
-                self.send_command(b'\x06')
-                self.send_command(b'\x00' + dict_to_status(STAT_5))
-                self.send_command(b'\x00' + dict_to_status(STAT_6))
+                r = self.send_command(b'')
+                self.log.debug(f'FW2: {r[0]}')
+                r = self.send_command(b'\x05' + fw[122877:166965])
+                self.log.debug(f'FW3: {r[0]}')
+                r = self.send_command(b'\x06')
+                self.log.debug(f'Post-FW START:{r[0]}')
+                r = self.send_command(b'\x00' + dict_to_status(STAT_5))
+                self.log.debug(f'STAT_5: {r[0]}')
+                r = self.send_command(b'\x00' + dict_to_status(STAT_6))
+                self.log.debug(f'STAT_6: {r[0]}')
                 STAT_6[77] = 1
-                self.send_command(b'\x00' + dict_to_status(STAT_6))
+                r = self.send_command(b'\x00' + dict_to_status(STAT_6))
+                self.log.debug(f'STAT_6[77] = 1: {r[0]}')
                 STAT_6[77] = 0
-                self.send_command(b'\x00' + dict_to_status(STAT_6))
+                r = self.send_command(b'\x00' + dict_to_status(STAT_6))
+                self.log.debug(f'STAT_6[77] = 0: {r[0]}')
                 STAT_6[1]  &= 0xf3
-                self.send_command(b'\x00' + dict_to_status(STAT_6))
+                r = self.send_command(b'\x00' + dict_to_status(STAT_6))
+                self.log.debug(f'STAT_6[1] &= 0xf3: {r[0]}')
 
             self.clear_spectrum()
-            self.read_status_register()
         else:
-            # No firmware config - get config 3x
+            # No firmware config needed
             self.read_status_register()
           
             # Set CNT byte
@@ -186,7 +194,8 @@ class digiBase:
             self.write_status_register()
             self._status[610] = 1
             self.write_status_register()
-            self.read_status_register()
+        
+        self.read_status_register()
         
     def read_status_register(self):
         self._status = bit_register(
@@ -248,14 +257,36 @@ class digiBase:
             if i%16 == 15: print(' ')
 
     @property
-    def livetime(self):
+    def livetime(self) -> float:
+        "Acquisition livetime, in seconds"
         self.read_status_register()
-        return self._status[224:256]
+        return self._status[224:256] / 20
     
     @property
-    def realtime(self):
+    def livetime_preset(self) -> float:
+        "Acquisition livetime limit, in seconds"
         self.read_status_register()
-        return self._status[288:320]
+        return self._status[192:224] / 20
+    
+    @livetime_preset.setter
+    def livetime_preset(self, val: float):
+        self._status[192:224] = int(val * 20) & 0xffff_ffff
+        self.write_status_register()
+    
+    @property
+    def realtime(self) -> float:
+        self.read_status_register()
+        return self._status[288:320] / 20
+
+    @property
+    def realtime_preset(self) -> float:
+        self.read_status_register()
+        return self._status[256:288] / 20
+    
+    @realtime_preset.setter
+    def realtime_preset(self, val: float):
+        self._status[256:288] = int(val * 20) & 0xffff_ffff
+        self.write_status_register()
 
     @property
     def spectrum(self):
@@ -330,6 +361,10 @@ class digiBase:
     def uld(self, val):
         val &= 0xffff
         self._status[176:192] = val
+        self.write_status_register()
+
+    def ext_gate(self, enabled: bool):
+        self._status[56:64] = 0x03 if enabled else 0x00
         self.write_status_register()
     
     def set_acq_mode_list(self):
