@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 import numpy as np
 from struct import pack, unpack
 import logging
+from enum import Enum
 
 # FIX THIS - I followed what libdbaseRH was doing
 # and it's really convoluted. 
@@ -104,6 +105,11 @@ class bit_register:
             len = idx.stop - idx.start
             mask = (1 << len) - 1
             self.reg = (self.reg & ~(mask << idx.start)) | (val << idx.start)
+
+class ExtGateMode(Enum):
+    OFF = 0
+    COINCIDENCE = 1
+    ENABLED = 3
 
 class digiBase:
     VENDOR_ID: int  = 0x0a2d
@@ -260,32 +266,32 @@ class digiBase:
     def livetime(self) -> float:
         "Acquisition livetime, in seconds"
         self.read_status_register()
-        return self._status[224:256] / 20
+        return self._status[224:256] / 50
     
     @property
     def livetime_preset(self) -> float:
         "Acquisition livetime limit, in seconds"
         self.read_status_register()
-        return self._status[192:224] / 20
+        return self._status[192:224] / 50
     
     @livetime_preset.setter
     def livetime_preset(self, val: float):
-        self._status[192:224] = int(val * 20) & 0xffff_ffff
+        self._status[192:224] = int(val * 50) & 0xffff_ffff
         self.write_status_register()
     
     @property
     def realtime(self) -> float:
         self.read_status_register()
-        return self._status[288:320] / 20
+        return self._status[288:320] / 50
 
     @property
     def realtime_preset(self) -> float:
         self.read_status_register()
-        return self._status[256:288] / 20
+        return self._status[256:288] / 50
     
     @realtime_preset.setter
     def realtime_preset(self, val: float):
-        self._status[256:288] = int(val * 20) & 0xffff_ffff
+        self._status[256:288] = int(val * 50) & 0xffff_ffff
         self.write_status_register()
 
     @property
@@ -363,8 +369,8 @@ class digiBase:
         self._status[176:192] = val
         self.write_status_register()
 
-    def ext_gate(self, enabled: bool):
-        self._status[56:64] = 0x03 if enabled else 0x00
+    def ext_gate(self, mode: ExtGateMode):
+        self._status[56:64] = mode.value
         self.write_status_register()
     
     def set_acq_mode_list(self):
@@ -401,6 +407,7 @@ if __name__ == "__main__":
     parser = ArgumentParser(prog='digibase.py', description='Simple DAQ for ORTEC/AMETEK digiBase')
     parser.add_argument('--pmt-hv', type=int, default=800)
     parser.add_argument('--disc', type=int, default=0)
+    parser.add_argument('-X', '--external-gate', action='store_true')
 
     parser.add_argument('-L', '--log-level', nargs='?', default='WARNING', const='INFO')
 
@@ -431,6 +438,7 @@ if __name__ == "__main__":
 
     if args.disc > 0:
         base.lld = args.disc
+    base.ext_gate(args.external_gate)
     base.hv = args.pmt_hv
     base.enable_hv()
     sleep(1.0)
