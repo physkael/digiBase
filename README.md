@@ -10,8 +10,9 @@ If you don't want to use the AMETEK Connections library, or can't, you may find 
 I wrote this interface because I needed to create a Raspberry Pi data acquisition system for
 use in remote locations. The functionality is basic but currently supports:
 
-* HV set
-* Livetime / realtime set
+* HV programming (no readback yet)
+* ADC _fine_ gain setting
+* Livetime / realtime setting and reading
 * Lower-level discriminator set
 * EXT gate OFF, ENABLED, COINCIDENCE modes
 * PHA mode
@@ -26,9 +27,15 @@ interfaces.
 * NumPy (I will try to refactor this out)
 
 ## Installation
-I am actively hacking on this right now so it's just a python file. Download, set PYTHONPATH if necessary, and voila!
+Currently the code exists as a single python module. If using as a module, set PYTHONPATH as appropriate. The module also sports a command line interface that is fairly well documented using Python's argparse package:
 
-## Basic Usage
+```bash
+$ ./digibase.py --help
+```
+
+will provide help on the various commands and options it supports.
+
+## Basic Usage - Python Module
 
 This currently (I think) only supports one device so if you have multiple devices connected I think it will find the first one. ORTEC seems to have manufactured several versions 
 
@@ -93,7 +100,7 @@ sustained over 32 ksps so you have about a second to start draining the buffer:
 ```python
 hits = []
 while some_condition_is_true:
-    while new_hits := base.hits > 0: hits += new_hits
+    while len(new_hits := base.hits) > 0: hits += new_hits
 ```
 
 I've used the Python 3.8+ walrus operator to enter a tight loop that drains the
@@ -125,4 +132,22 @@ for h in hits:
         hit_times.append(t)
         hit_q.append((h >> 21) & 0x3ff)
 ```
+
+## Using the External Gate
+Hit collection can be suppressed using a TTL-level signal connected to
+the SMA input on the base. This suppression occurs for both PHA _and_
+list mode acquisitions. The external gate mode determines how the base
+responds to this external gate:
+
+* When mode = `ExtGateMode.OFF`, the external gate is ignored, _i.e._ 
+  acquisition continues.
+* When mode = `ExtGateMode.ENABLED`, a TTL low on the external gate
+  will suspend the data acquisition. As far as I can tell, this 
+  also _stops_ the livetime counter as well as the microsecond
+  timestamp counter in list acquisition mode.
+* When mode = `ExtGateMode.COINCIDENCE`, TTL low will stop hit
+  collection (i.e. no hits will fill the MCA channels in PHA
+  mode and hits will not appear in list mode), however the livetime
+  and timestamp counters continue to tick.
+
 

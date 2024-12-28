@@ -380,6 +380,8 @@ class digiBase:
     
     @fine_gain.setter
     def fine_gain(self, val: float):
+        if val < 0.5 or val >= 2.0:
+            raise ValueError("Fine gain out of range [0.5, 2.0)")
         val = int(val / 0.5 * 0x2000)
         self._status[136:152] = val
         self.write_status_register()
