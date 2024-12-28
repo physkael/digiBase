@@ -301,16 +301,26 @@ class digiBase:
     
     @property
     def hits(self):
-        resp = self.send_command(b'\x80', max_length=16384)
+        resp = self.send_command(b'\x80', max_length=132_000)
         n = len(resp) // 4
         return unpack(f'{n}I', resp)
 
+    @property
+    def hv_enabled(self):
+        self.read_status_register()
+        return self._status[6]
+    
+    @hv_enabled.setter
+    def hv_enabled(self, val: bool):
+        self._status[6] = 1 if val else 0
+        self.write_status_register
+
+    @DeprecationWarning
     def enable_hv(self):
-        if self.hv > 1200: 
-            raise ValueError(f"HV setting {self.hv} exceeds max value.")
         self._status[6] = 1
         self.write_status_register()
         
+    @DeprecationWarning
     def disable_hv(self):
         self._status[6] = 0
         self.write_status_register()
@@ -363,6 +373,17 @@ class digiBase:
         self.read_status_register()
         return self._status[176:192]
     
+    @property
+    def fine_gain(self) -> float:
+        self.read_status_register()
+        return self._status[136:152] / 0x2000 * 0.5
+    
+    @fine_gain.setter
+    def fine_gain(self, val: float):
+        val = int(val / 0.5 * 0x2000)
+        self._status[136:152] = val
+        self.write_status_register()
+
     @uld.setter
     def uld(self, val):
         val &= 0xffff
@@ -372,6 +393,15 @@ class digiBase:
     def ext_gate(self, mode: ExtGateMode):
         self._status[56:64] = mode.value
         self.write_status_register()
+
+    def set_presets(self, livetime: bool=False, realtime: bool=False):
+        """
+        Set / reset livetime and realtime presets.
+        The DBASE will stop acquisition when either preset is reached.
+        The livetime and realtiem preset values are set elsewhere.
+        """
+        self._status[2] = 1 if livetime else 0
+        self._status[3] = 1 if realtime else 0
     
     def set_acq_mode_list(self):
         self._status[0:2] = 0
@@ -391,7 +421,10 @@ def write_background(filename, s:np.ndarray, exposure:float, comment:str):
         f.write(b'DBKG\x00\x00\x00\x00')
         f.write(pack('d', datetime.now().timestamp()))
         f.write(pack('d', exposure))
-        f.write(comment.encode('utf-8')[:63].ljust(64, b'\x00'))
+        if comment is None:
+            f.write(b'\x00'*64)
+        else:
+            f.write(comment.encode('utf-8')[:63].ljust(64, b'\x00'))
         s.tofile(f)
 
 def read_background(filename) -> tuple[np.ndarray, float, float, str]:
@@ -406,12 +439,15 @@ if __name__ == "__main__":
     
     parser = ArgumentParser(prog='digibase.py', description='Simple DAQ for ORTEC/AMETEK digiBase')
     parser.add_argument('--pmt-hv', type=int, default=800)
-    parser.add_argument('--disc', type=int, default=0)
-    parser.add_argument('-X', '--external-gate', action='store_true')
+    parser.add_argument('--disc', type=int, default=20)
+    parser.add_argument('-X', '--external-gate', default='OFF', choices=['OFF', 'COINCIDENCE', 'ENABLED'])
+    parser.add_argument('-g', '--gain', type=float, default=0.5)
+    parser.add_argument('--realtime-preset', type=float, default=0.0)
+    parser.add_argument('--livetime-preset', type=float, default=0.0)
 
     parser.add_argument('-L', '--log-level', nargs='?', default='WARNING', const='INFO')
 
-    subparsers = parser.add_subparsers(dest='command', help='Available commands: spect | detect')
+    subparsers = parser.add_subparsers(dest='command', help='Run modes')
     parser_spe = subparsers.add_parser('spect', help='Acquire spectrum, write to file')
     parser_spe.add_argument('duration', type=float, help='Time, in seconds to integrate spectrum')
     parser_spe.add_argument('filename', help='Output file in which spectrum is saved')
@@ -424,6 +460,10 @@ if __name__ == "__main__":
     parser_det.add_argument('sig0', type=int, help='Channel # of low side of signal RoI')
     parser_det.add_argument('sig1', type=int, help='Channel # of high side of signal RoI')
     parser_det.add_argument('-a', '--alpha', type=float, help='Exponential Moving Average parameter.')
+
+    parser_acq = subparsers.add_parser('acq', help='List mode acquisition')
+    parser_acq.add_argument('duration', type=float, help='Acquisition time')
+    parser_acq.add_argument('filename', help='Output file for list mode data')
     
     args = parser.parse_args()
 
@@ -431,24 +471,38 @@ if __name__ == "__main__":
     log = logging.getLogger()
 
     base = digiBase()
-    
-    # The device holds state
+
+    # Configure the device to sane defaults    
     base.clear_spectrum()
     base.clear_counters()
+    
+    base.livetime_preset = args.livetime_preset
+    base.realtime_preset = args.realtime_preset
+    base.set_presets(livetime=args.livetime_preset > 0, realtime=args.realtime_preset > 0)
 
-    if args.disc > 0:
-        base.lld = args.disc
-    base.ext_gate(args.external_gate)
-    base.hv = args.pmt_hv
-    base.enable_hv()
-    sleep(1.0)
-    base.start()
+    base.lld = args.disc
+    base.ext_gate(ExtGateMode[args.external_gate])
+
+    # HV and gain settings
+    if base.hv != args.pmt_hv: base.hv = args.pmt_hv
+    if not base.hv_enabled: 
+        base.hv_enabled = True
+        sleep(5.0)
+    base.fine_gain = args.gain
 
     if args.command == 'spect':
+        base.set_acq_mode_pha()
+        base.start()
         sleep(args.duration)
+        base.stop()
         spectrum = np.array(base.spectrum, dtype=np.int32)
+        print(f"Collected {np.sum(spectrum)} counts")
+        print(f"Livetime {base.livetime:.3f} s")
+        print(f"Realtime {base.realtime:.3f} s")
         write_background(args.filename, spectrum, args.duration, args.comment)
     elif args.command == 'detect':
+        base.set_acq_mode_pha()
+        base.start()
         bkg, t_bkg, exp_bkg, comment = read_background(args.filename)
         bkg = bkg * args.duration / exp_bkg
         spectrum_last = np.zeros(1024, dtype=np.int32)
@@ -457,11 +511,24 @@ if __name__ == "__main__":
             sleep(args.duration)
             spectrum = np.array(base.spectrum, dtype=np.int32)
             spectrum_diff = spectrum - spectrum_last
+            cspec = np.sum(spectrum_diff)
             bkg_sub = spectrum_diff - bkg
             spectrum_last = spectrum
             c = np.sum(bkg_sub[args.sig0:args.sig1])
             counts = c if counts is None else c*args.alpha + counts*(1-args.alpha)
-            print(datetime.now(), '-', f'counts {counts:.1f}')
-
-    base.stop()
-    base.disable_hv()
+            print(datetime.now(), '-', f'cs: {cspec:.1f} counts {counts:.1f}')
+        base.stop()
+    elif args.command == 'acq':
+        nhits = 0
+        with open(args.filename, 'wb') as fhits:
+            base.set_acq_mode_list()
+            base.start()
+            t0 = datetime.now()
+            while (datetime.now() - t0).total_seconds < args.duration:
+                hits = base.hits
+                nhits += len(hits)
+                if len(hits) > 0: fhits.write(pack(f'{len(hits)}I', *hits))
+            base.stop()
+        print(f"Collected {nhits} hits")
+        print(f"Livetime {base.livetime:.3f} s")
+        print(f"Realtime {base.realtime:.3f} s")
