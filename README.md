@@ -35,6 +35,26 @@ $ ./digibase.py --help
 
 will provide help on the various commands and options it supports.
 
+### DigiBase Firmware
+Device firmware must be loaded at power up. ORTEC distributes this firmware with
+their MAESTRO and Connection software. You may find this in the distribution media
+or in the install directories of the aforementioned software, in `\WINDOWS`, or 
+in `\WINDOWS\SYSTEM32` with filename `digiBase.rbf` or `digiBaseRH.rbf`. Place this
+file in the current working directory or set the environment variable 
+`DBASE_FIRMWARE` to point to the file.
+
+### USB Device Permission (Linux)
+Under Linux the module may fail to open the USB device due to lack of permission. 
+While it's always possible to `sudo chown 666 /dev/bus/usb/xxx/yyy` it will likely
+be reset across power off or even after unplugging and plugging the device back in.
+The better solution in this case is to add a custom udev rule:
+
+```bash
+sudo echo <<EOF > /etc/udev/rules.d/50-usb-perms.rules
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0a2d", GROUP="users", MODE="0666"
+EOF
+```
+
 ## Basic Usage - Python Module
 
 This currently (I think) only supports one device so if you have multiple devices connected I think it will find the first one. ORTEC seems to have manufactured several versions 

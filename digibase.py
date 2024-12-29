@@ -1,9 +1,11 @@
 #! /bin/env python3
 
+#Copyright (c) 2024 Kael Hanson (kael.hanson@gmail.com)
+
 import usb.core
 import usb.util
 from array import array
-import sys
+import sys, os
 from argparse import ArgumentParser
 from time import sleep
 from datetime import datetime, timedelta
@@ -138,12 +140,16 @@ class digiBase:
             needs_init = (r[0] == 0)
 
         if needs_init:
+            if 'DBASE_FIRMWARE' in os.environ:
+                firmware_path = os.environ['DBASE_FIRMWARE']
+            else:
+                firmware_path = './digiBase' + ('RH' if self.isRH else '') + '.rbf'
+            with open(firmware_path, 'rb') as f:
+                fw = f.read()
             if self.isRH:
                 # Firmware configuration needed - write a START2 packet
                 self.send_command(b'\x04\x00\x02\x00', init=True)
                 self.log.info('Loading digiBase RH firmware')
-                with open('./digiBaseRH.rbf', 'rb') as f:
-                    fw = f.read()
                 for page in (fw[:61424], fw[61424:75463]):
                     self.send_command(b'\x05\x00\x02\x00' + page, init=True)
                 self.send_command(b'\x06\x00\x02\x00', init=True)
@@ -164,8 +170,6 @@ class digiBase:
             else:
                 self.send_command(b'\x04')
                 self.log.info('Loading firmware')
-                with open('./digiBase.rbf', 'rb') as f:
-                    fw = f.read()
                 r = self.send_command(b'\x05' + fw[0:61438])
                 self.log.debug(f'FW1: {r[0]}')
                 self.send_command(b'\x05' + fw[61438:122877], no_read=True)
