@@ -2,4 +2,7 @@ __pycache__/
 .venv/
 __data__/
 
+dist/
+*.egg-info/
+
 *.rbf
