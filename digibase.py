@@ -396,6 +396,11 @@ class digiBase:
         self._status[176:192] = val
         self.write_status_register()
 
+    @property
+    def ext_gate(self) -> ExtGateMode:
+        return ExtGateMode(self._status[56:64])
+    
+    @ext_gate.setter
     def ext_gate(self, mode: ExtGateMode):
         self._status[56:64] = mode.value
         self.write_status_register()
@@ -487,7 +492,7 @@ if __name__ == "__main__":
     base.set_presets(livetime=args.livetime_preset > 0, realtime=args.realtime_preset > 0)
 
     base.lld = args.disc
-    base.ext_gate(ExtGateMode[args.external_gate])
+    base.ext_gate = ExtGateMode[args.external_gate]
 
     # HV and gain settings
     if base.hv != args.pmt_hv: base.hv = args.pmt_hv
