@@ -37,6 +37,7 @@ Python 3.8+ is required. Additionally, it depends on the following packages:
 
 * pyusb
 * NumPy
+* pytest (optional, to run unit tests)
 
 ## Installation
 Digibase is now a Python package on PyPI and is most easily installed using `pip`:
@@ -115,8 +116,8 @@ base.hv_enabled = False
 #### Livetime and Realtime Counters and Presetting Acquisition Time
 The digiBASE contains counters to separately track realtime and livetime. 
 Furthermore, acquisition can be preset to stop when these counters reach a 
-certain value. The following will setup the acquisition to stop when
-either after 75 s of wall time or after one minute of livetime, whichever
+certain value. The following will setup the acquisition to stop either 
+after 75 s of wall time or after one minute of livetime, whichever
 occurs first:
 ```python
 base.realtime_preset = 75.0
@@ -140,6 +141,34 @@ responds to this external gate:
   collection (i.e. no hits will fill the MCA channels in PHA
   mode and hits will not appear in list mode), however the livetime
   and timestamp counters continue to tick.
+
+#### Gain
+Electronic amplifier gain is set and read by the `fine_gain` property of the
+`digiBase` class:
+```python
+base.fine_gain = 1.0
+```
+The digiBASE can apparently adjust this parameter internally in order to
+track gain and offset drifts, as documented in the device manual, by
+tracking a peak in the acquired spectrum. This feature is enabled by
+passing triplets of (high_channel, center_channel, low_channel) to
+either of the gain or zero named parameters of the `auto_stabilize`
+method:
+```python
+base.auto_stabilize(gain=(80, 75, 70), zero=(80, 75, 70))
+```
+will turn on both gain and offset stabilization using a peak that 
+should be centered at 75 ADC counts inside an ROI of 70 to 80 ADC counts.
+_Note_: this feature is not tested; I recommend turning off auto
+stabilization which can be effected by calling with arguments 
+set to `None`:
+```python
+base.auto_stabilize(gain=None, zero=None)
+```
+or just
+```python
+base.auto_stabilize()
+```
 
 ### PHA Mode Acquisition
 A 15 second run in PHA mode with PMT set to 800 V, the lower-level 
