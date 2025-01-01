@@ -9,9 +9,12 @@ from time import sleep
 
 @pytest.fixture(scope='module')
 def base_dev():
-    base = digibase.digiBase()
-    yield base
-    del base
+    try:
+        base = digibase.digiBase()
+        yield base
+        del base
+    except ValueError:
+        pytest.skip('No device connected')
 
 def test_serial_read(base_dev):
     assert len(base_dev.serial) > 0
@@ -47,13 +50,15 @@ def test_set_lld(base_dev):
         base_dev.lld = lld
         assert base_dev.lld == lld
 
-def test_presets(base_dev):
+def test_realtime_preset(base_dev):
     base_dev.stop()
     base_dev.ext_gate = digibase.ExtGateMode.OFF
     base_dev.realtime_preset = 1.0
+    assert base_dev.realtime_preset == 1.0
     base_dev.clear_counters()
-    base_dev.
+    base_dev.set_presets(livetime=False, realtime=True)
     base_dev.start()
     sleep(1.25)
     base_dev.stop()
     assert base_dev.realtime > 0.99 and base_dev.realtime < 1.01
+    base_dev.set_presets()

@@ -58,7 +58,7 @@ from enum import Enum
 
 # FIX THIS - I followed what libdbaseRH was doing
 # and it's really convoluted. 
-STAT_1 = b'\x00\xb3\x00\x0c\x20\x00\x30\x20' + \
+STAT_1 = b'\x00\x83\x00\x0c\x20\x00\x30\x20' + \
          b'\x03\x00\x00\x00\x00\x0a\x00\x00' + \
          b'\x00\x00\x00\xa0\x00\x00\x28\x00' + \
          b'\x00\x00\x00\x00\x00\x00\x00\x00' + \
@@ -69,7 +69,7 @@ STAT_1 = b'\x00\xb3\x00\x0c\x20\x00\x30\x20' + \
          b'\x00\x00\x80\x9e\x00\x85\x00\x6c' + \
          b'\x00\x40\x00\x00\x00\x10\x0c\x24\x00'
 
-STAT_2 = b'\x00\x31\x00\x0c\x20\x00\x30\x20' + \
+STAT_2 = b'\x00\x01\x00\x0c\x20\x00\x30\x20' + \
          b'\x03\x00\x00\x00\x00\x0a\x00\x00' + \
          b'\x00\x00\x00\x20\x00\x00\x28\x00' + \
          b'\x00\x00\x00\x00\x00\x00\x00\x00' + \
@@ -80,7 +80,7 @@ STAT_2 = b'\x00\x31\x00\x0c\x20\x00\x30\x20' + \
          b'\x00\x00\x00\x9e\x00\x85\x00\x6c' + \
          b'\x00\x40\x00\x00\x00\x00\x0c\x24\x00'
 
-STAT_3 = b'\x00\x31\x00\x0c\x20\x00\x30\x20' + \
+STAT_3 = b'\x00\x01\x00\x0c\x20\x00\x30\x20' + \
          b'\x03\x00\x00\x00\x00\x0a\x00\x00' + \
          b'\x00\x00\x00\x20\x00\x00\x28\x00' + \
          b'\x00\x00\x00\x00\x00\x00\x00\x00' + \
@@ -91,7 +91,7 @@ STAT_3 = b'\x00\x31\x00\x0c\x20\x00\x30\x20' + \
          b'\x00\x00\x00\x9e\x00\x85\x00\x6c' + \
          b'\x00\x40\x00\x00\x00\x01\x0c\x24\x00'
 
-STAT_4 = b'\x00\x31\x00\x0c\x20\x00\x30\x20' + \
+STAT_4 = b'\x00\x01\x00\x0c\x20\x00\x30\x20' + \
          b'\x03\x00\x00\x00\x00\x0a\x00\x00' + \
          b'\x00\x00\x00\x20\x00\x00\x28\x00' + \
          b'\x00\x00\x00\x00\x00\x00\x00\x00' + \
@@ -104,9 +104,8 @@ STAT_4 = b'\x00\x31\x00\x0c\x20\x00\x30\x20' + \
 
 # For non-RH style bases - Q&D fix this 
 STAT_5 = {
-    1  : 0xbd,  3: 0x0c,  6: 0x30,  7: 0x20,  8: 0x03,
+    1  : 0x83,  3: 0x0c,  6: 0x30,  7: 0x20,  8: 0x03,
     13 : 0x0a, 18: 0x00, 19: 0xa0, 21: 0xb0, 22: 0x1e,
-    #13 : 0x0a, 18: 0xb5, 19: 0xa9, 21: 0xb0, 22: 0x1e,
     41 : 0xff, 42: 0x03, 43: 0x58, 44: 0x02, 57: 0xfa,
     58 : 0x01, 59: 0xd5, 60: 0x01, 61: 0xb0, 62: 0x01,
     66 : 0x80, 67: 0xfa, 68: 0x01, 69: 0xd5, 70: 0x01,
@@ -115,8 +114,7 @@ STAT_5 = {
 }
 
 STAT_6 = {
-    1 : 0x3d,  3: 0x0c,  6: 0x30,  7: 0x20,  8: 0x03,
-#13: 0x0a, 18: 0xb5, 19: 0x29, 21: 0xb0, 22: 0x1e,
+    1 : 0x01,  3: 0x0c,  6: 0x30,  7: 0x20,  8: 0x03,
     13: 0x0a, 18: 0x00, 19: 0x20, 21: 0xb0, 22: 0x1e,
     41: 0xff, 42: 0x03, 43: 0x58, 44: 0x02, 57: 0xfa,
     58: 0x01, 59: 0xd5, 60: 0x01, 61: 0xb0, 62: 0x01,
@@ -503,8 +501,9 @@ class digiBase:
 
     def __del__(self):
         self.log.debug('Closing device')
-        usb.util.release_interface(self.dev, 0)
-        usb.util.dispose_resources(self.dev)
+        if self.dev is not None:
+            usb.util.release_interface(self.dev, 0)
+            usb.util.dispose_resources(self.dev)
 
 
 def write_background(filename, s:np.ndarray, exposure:float, comment:str):
