@@ -2,6 +2,48 @@
 
 #Copyright (c) 2024 Kael Hanson (kael.hanson@gmail.com)
 
+"""
+digibase.py - Simple DAQ for ORTEC/AMETEK digiBase
+---------------------------------------------------
+
+This module provides a simple interface to the ORTEC/AMETEK digiBASE,
+a combined PMT base and data acquisition front-end. The digiBASE and
+digiBASE-RH are USB devices.
+
+The main control surface is an 80-byte status register that is
+accessed in this class as a 640-bit register. Known subfields are:
+
+    0       Acquisition mode (1 = PHA, 0 = list mode acquisition)
+    1       Start/stop acquisition (1 = start, 0 = stop)
+    2       Enable livetime preset
+    3       Enable realtime preset  
+    4       Automatic gain stabilization enable/disable
+    5       Automatic zero stabilization enable/disable
+    6       HV enable
+    7       Reserved/unknown
+    8       Busy collecting data
+    9       Enable input status
+    10      Waveform ready
+    11      HV readback ADC busy
+    12      Reserved
+    13:14   HV readback - high 2 bits
+    15      Reserved
+    16:23   Pulse width
+    24:32   HV readback - low 8 bits
+    40:47   Reserved
+    48:55   Reserved
+    56:63   External gate mode (0 = off, 1 = coincidence, 3 = enabled)
+    96:120  Fine gain readback
+    128:152 Fine gain set
+    192:224 Livetime preset
+    224:256 Livetime counter
+    256:288 Realtime preset
+    288:320 Realtime counter
+    320:336 Should be 0x03ff - number of MCA channels
+    336:352 HV setpoint (1.25 V increments)
+    608     Clear counters
+"""
+
 import usb.core
 import usb.util
 from array import array
@@ -63,7 +105,8 @@ STAT_4 = b'\x00\x31\x00\x0c\x20\x00\x30\x20' + \
 # For non-RH style bases - Q&D fix this 
 STAT_5 = {
     1  : 0xbd,  3: 0x0c,  6: 0x30,  7: 0x20,  8: 0x03,
-    13 : 0x0a, 18: 0xb5, 19: 0xa9, 21: 0xb0, 22: 0x1e,
+    13 : 0x0a, 18: 0x00, 19: 0xa0, 21: 0xb0, 22: 0x1e,
+    #13 : 0x0a, 18: 0xb5, 19: 0xa9, 21: 0xb0, 22: 0x1e,
     41 : 0xff, 42: 0x03, 43: 0x58, 44: 0x02, 57: 0xfa,
     58 : 0x01, 59: 0xd5, 60: 0x01, 61: 0xb0, 62: 0x01,
     66 : 0x80, 67: 0xfa, 68: 0x01, 69: 0xd5, 70: 0x01,
@@ -73,7 +116,8 @@ STAT_5 = {
 
 STAT_6 = {
     1 : 0x3d,  3: 0x0c,  6: 0x30,  7: 0x20,  8: 0x03,
-    13: 0x0a, 18: 0xb5, 19: 0x29, 21: 0xb0, 22: 0x1e,
+#13: 0x0a, 18: 0xb5, 19: 0x29, 21: 0xb0, 22: 0x1e,
+    13: 0x0a, 18: 0x00, 19: 0x20, 21: 0xb0, 22: 0x1e,
     41: 0xff, 42: 0x03, 43: 0x58, 44: 0x02, 57: 0xfa,
     58: 0x01, 59: 0xd5, 60: 0x01, 61: 0xb0, 62: 0x01,
     67: 0xfa, 68: 0x01, 69: 0xd5, 70: 0x01, 71: 0xb0,
@@ -357,7 +401,7 @@ class digiBase:
     @property
     def hv_readback(self):
         self.read_status_register()
-        return self._status[24:40]
+        return self._status[24:32] | (self._status[13:15] << 8)
     
     @property
     def lld(self):
@@ -380,14 +424,17 @@ class digiBase:
     @property
     def fine_gain(self) -> float:
         self.read_status_register()
-        return self._status[136:152] / 0x2000 * 0.5
+        return self._status[128:152] / 0x200000 * 0.5
     
     @fine_gain.setter
     def fine_gain(self, val: float):
-        if val < 0.5 or val >= 2.0:
-            raise ValueError("Fine gain out of range [0.5, 2.0)")
-        val = int(val / 0.5 * 0x2000)
-        self._status[136:152] = val
+        if val < 0.25 or val >= 2.0:
+            raise ValueError("Fine gain out of range [0.25, 2.0)")
+        # The fine gain really does appear to be a 23-bit value
+        val = int(val / 0.5 * 0x200000)
+        # Set high bit to 1 to active register write
+        # On read the bit should be cleared
+        self._status[128:152] = val | 0x800000
         self.write_status_register()
 
     @uld.setter
@@ -398,11 +445,38 @@ class digiBase:
 
     @property
     def ext_gate(self) -> ExtGateMode:
+        self.read_status_register()
         return ExtGateMode(self._status[56:64])
     
     @ext_gate.setter
     def ext_gate(self, mode: ExtGateMode):
         self._status[56:64] = mode.value
+        self.write_status_register()
+
+    def auto_stabilize(self, gain: tuple=None, zero: tuple=None):
+        """ 
+        Enable / disable internal gain and zero/offset stabilization.
+        Manual says this is to correct for temperature-related drifts.
+        Use with caution.
+
+        Parameters
+        ----------
+        gain : list
+            (hi_ch, center_ch, lo_ch) tuple or None for gain stabilization
+        zero : list
+            (hi_ch, center_ch, lo_ch) tuple or None for zero stabilization
+        """
+        self._status[4:6] = 0
+        if gain is not None and isinstance(gain, (tuple,list)) and len(gain) == 3:
+            self._status[4] = 1
+            self._status[448:464] = gain[0]
+            self._status[464:480] = gain[1]
+            self._status[480:496] = gain[2]
+        if zero is not None and isinstance(zero, (tuple,list)) and len(zero) == 3:
+            self._status[5] = 1
+            self._status[528:544] = zero[0]
+            self._status[544:560] = zero[1]
+            self._status[560:576] = zero[2]
         self.write_status_register()
 
     def set_presets(self, livetime: bool=False, realtime: bool=False):
@@ -426,6 +500,12 @@ class digiBase:
     def set_acq_mode_pha(self):
         self._status[0] = 1
         self.write_status_register()
+
+    def __del__(self):
+        self.log.debug('Closing device')
+        usb.util.release_interface(self.dev, 0)
+        usb.util.dispose_resources(self.dev)
+
 
 def write_background(filename, s:np.ndarray, exposure:float, comment:str):
     with open(filename, 'wb') as f:
@@ -494,6 +574,9 @@ if __name__ == "__main__":
     base.lld = args.disc
     base.ext_gate = ExtGateMode[args.external_gate]
 
+    # Disable auto gain and zero stabilization
+    base.auto_stabilize()
+
     # HV and gain settings
     if base.hv != args.pmt_hv: base.hv = args.pmt_hv
     if not base.hv_enabled: 
@@ -504,8 +587,13 @@ if __name__ == "__main__":
     if args.command == 'spect':
         base.set_acq_mode_pha()
         base.start()
-        sleep(args.duration)
+        t0 = datetime.now()
+        run_time = timedelta(seconds=args.duration)
+        while (elapsed_time := datetime.now() - t0) < run_time:
+            print("Elapsed time: " + str(elapsed_time), end='\r')
+            sleep(0.1)
         base.stop()
+        print("Elapsed time: " + str(elapsed_time))
         spectrum = np.array(base.spectrum, dtype=np.int32)
         print(f"Collected {np.sum(spectrum)} counts")
         print(f"Livetime {base.livetime:.3f} s")
@@ -516,6 +604,8 @@ if __name__ == "__main__":
         base.start()
         bkg, t_bkg, exp_bkg, comment = read_background(args.filename)
         bkg = bkg * args.duration / exp_bkg
+        log.debug(f'Total background counts after normalization {np.sum(bkg)}')
+        log.debug(f'ROI background counts after normalization {np.sum(bkg[args.sig0:args.sig1])}')
         spectrum_last = np.zeros(1024, dtype=np.int32)
         counts = None
         for i in range(args.n):
@@ -526,8 +616,9 @@ if __name__ == "__main__":
             bkg_sub = spectrum_diff - bkg
             spectrum_last = spectrum
             c = np.sum(bkg_sub[args.sig0:args.sig1])
+            craw = np.sum(spectrum_diff[args.sig0:args.sig1])
             counts = c if counts is None else c*args.alpha + counts*(1-args.alpha)
-            print(datetime.now(), '-', f'cs: {cspec:.1f} counts {counts:.1f}')
+            print(datetime.now(), '-', f'cs: {cspec:.1f} craw {craw} counts {counts:.1f}', flush=True)
         base.stop()
     elif args.command == 'acq':
         nhits = 0
