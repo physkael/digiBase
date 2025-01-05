@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "digibase"
-version = "0.2.0"
+version = "0.3.0-rc1"
 description = "Interface to ORTEC/AMETEK digital PMT base / Multichannel Scaler"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -26,3 +26,6 @@ dependencies = [
 authors = [
     {name = "Kael Hanson", email = "kael.hanson@gmail.com"},
 ]
+
+[project.urls]
+Repository = "https://github.com/physkael/digiBase"

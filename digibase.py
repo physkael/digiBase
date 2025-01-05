@@ -56,6 +56,8 @@ from struct import pack, unpack
 import logging
 from enum import Enum
 
+__version__ = '0.3.0-rc1'
+
 # FIX THIS - I followed what libdbaseRH was doing
 # and it's really convoluted. 
 STAT_1 = b'\x00\x83\x00\x0c\x20\x00\x30\x20' + \
@@ -398,6 +400,10 @@ class digiBase:
 
     @property
     def hv_readback(self):
+        # Trigger HV ADC read
+        self._status[610] = 1
+        self.write_status_register()
+        sleep(0.01)
         self.read_status_register()
         return self._status[24:32] | (self._status[13:15] << 8)
     
@@ -526,7 +532,6 @@ def read_background(filename) -> tuple[np.ndarray, float, float, str]:
         return s, t, exp, comment
     
 if __name__ == "__main__":
-    
     parser = ArgumentParser(prog='digibase.py', description='Simple DAQ for ORTEC/AMETEK digiBase')
     parser.add_argument('--pmt-hv', type=int, default=800)
     parser.add_argument('--disc', type=int, default=20)
@@ -546,9 +551,9 @@ if __name__ == "__main__":
     parser_det = subparsers.add_parser('detect', help='Detect presence of signal over background')
     parser_det.add_argument('duration', type=float, help='Integration time of each query interval')
     parser_det.add_argument('n', type=int, help='Number of intervals')
-    parser_det.add_argument('filename', help='Spectrum file for background subtraction')
     parser_det.add_argument('sig0', type=int, help='Channel # of low side of signal RoI')
     parser_det.add_argument('sig1', type=int, help='Channel # of high side of signal RoI')
+    parser_det.add_argument('filename', nargs='+', help='Spectrum file for background subtraction')
     parser_det.add_argument('-a', '--alpha', type=float, help='Exponential Moving Average parameter.')
 
     parser_acq = subparsers.add_parser('acq', help='List mode acquisition')
@@ -597,27 +602,42 @@ if __name__ == "__main__":
         print(f"Collected {np.sum(spectrum)} counts")
         print(f"Livetime {base.livetime:.3f} s")
         print(f"Realtime {base.realtime:.3f} s")
-        write_background(args.filename, spectrum, args.duration, args.comment)
+        write_background(args.filename, spectrum, base.livetime, args.comment)
     elif args.command == 'detect':
         base.set_acq_mode_pha()
         base.start()
-        bkg, t_bkg, exp_bkg, comment = read_background(args.filename)
-        bkg = bkg * args.duration / exp_bkg
+        bkg = np.zeros(1024, dtype=np.int32)
+        exp_bkg = 0.0
+        for filename in args.filename:
+            s, t_bkg, pex, comment = read_background(filename)
+            bkg += s
+            exp_bkg += pex
+        
+        # Normalize control to counts per bin per second
+        bkg = bkg / exp_bkg
         log.debug(f'Total background counts after normalization {np.sum(bkg)}')
         log.debug(f'ROI background counts after normalization {np.sum(bkg[args.sig0:args.sig1])}')
         spectrum_last = np.zeros(1024, dtype=np.int32)
+        livetime_last = 0.0
         counts = None
-        for i in range(args.n):
-            sleep(args.duration)
-            spectrum = np.array(base.spectrum, dtype=np.int32)
-            spectrum_diff = spectrum - spectrum_last
-            cspec = np.sum(spectrum_diff)
-            bkg_sub = spectrum_diff - bkg
-            spectrum_last = spectrum
-            c = np.sum(bkg_sub[args.sig0:args.sig1])
-            craw = np.sum(spectrum_diff[args.sig0:args.sig1])
-            counts = c if counts is None else c*args.alpha + counts*(1-args.alpha)
-            print(datetime.now(), '-', f'cs: {cspec:.1f} craw {craw} counts {counts:.1f}', flush=True)
+
+        try:
+            for i in range(args.n):
+                sleep(args.duration)
+                spectrum = np.array(base.spectrum, dtype=np.int32)
+                livetime = base.livetime
+                livetime_diff = livetime - livetime_last
+                spectrum_diff = spectrum - spectrum_last
+                cspec = np.sum(spectrum_diff)
+                bkg_sub = spectrum_diff - bkg * livetime_diff
+                spectrum_last = spectrum
+                livetime_last = livetime
+                c = np.sum(bkg_sub[args.sig0:args.sig1])
+                craw = np.sum(spectrum_diff[args.sig0:args.sig1])
+                counts = c if counts is None else c*args.alpha + counts*(1-args.alpha)
+                print(datetime.now(), '-', f'cs: {cspec:.1f} craw {craw} counts {counts:.1f}', flush=True)
+        except KeyboardInterrupt:
+            print("User terminated run")
         base.stop()
     elif args.command == 'acq':
         nhits = 0
@@ -625,7 +645,7 @@ if __name__ == "__main__":
             base.set_acq_mode_list()
             base.start()
             t0 = datetime.now()
-            while (datetime.now() - t0).total_seconds < args.duration:
+            while (datetime.now() - t0).total_seconds() < args.duration:
                 hits = base.hits
                 nhits += len(hits)
                 if len(hits) > 0: fhits.write(pack(f'{len(hits)}I', *hits))
