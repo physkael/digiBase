@@ -20,7 +20,8 @@ I wrote this interface because I needed to create a Raspberry Pi data acquisitio
 use in the field, outside the laboratory environment. The functionality is basic but 
 currently supports:
 
-* HV programming (no readback yet)
+* HV programming
+* HV readback (version 0.3+)
 * ADC _fine_ gain setting
 * Livetime / realtime setting and reading
 * Lower-level discriminator set
