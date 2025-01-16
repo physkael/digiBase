@@ -56,7 +56,7 @@ from struct import pack, unpack
 import logging
 from enum import Enum
 
-__version__ = '0.3.0-rc1'
+__version__ = '0.3.1'
 
 # FIX THIS - I followed what libdbaseRH was doing
 # and it's really convoluted. 
@@ -555,6 +555,7 @@ if __name__ == "__main__":
     parser_det.add_argument('sig1', type=int, help='Channel # of high side of signal RoI')
     parser_det.add_argument('filename', nargs='+', help='Spectrum file for background subtraction')
     parser_det.add_argument('-a', '--alpha', type=float, help='Exponential Moving Average parameter.')
+    parser_det.add_argument('--norm-roi')
 
     parser_acq = subparsers.add_parser('acq', help='List mode acquisition')
     parser_acq.add_argument('duration', type=float, help='Acquisition time')
@@ -598,7 +599,7 @@ if __name__ == "__main__":
             sleep(0.1)
         base.stop()
         print("Elapsed time: " + str(elapsed_time))
-        spectrum = np.array(base.spectrum, dtype=np.int32)
+        spectrum = np.array(base.spectrum, dtype=np.uint32)
         print(f"Collected {np.sum(spectrum)} counts")
         print(f"Livetime {base.livetime:.3f} s")
         print(f"Realtime {base.realtime:.3f} s")
@@ -621,6 +622,12 @@ if __name__ == "__main__":
         livetime_last = 0.0
         counts = None
 
+        # Optional mode normalizes not on exposure time but a portion of the spectrum
+        norm_roi = None
+        if args.norm_roi is not None:
+            nr0, nr1 = args.norm_roi.split(',')
+            norm_roi = (int(nr0), int(nr1))
+
         try:
             for i in range(args.n):
                 sleep(args.duration)
@@ -629,13 +636,20 @@ if __name__ == "__main__":
                 livetime_diff = livetime - livetime_last
                 spectrum_diff = spectrum - spectrum_last
                 cspec = np.sum(spectrum_diff)
-                bkg_sub = spectrum_diff - bkg * livetime_diff
+                if norm_roi is not None:
+                    bkg_norm = np.sum(bkg[norm_roi[0]:norm_roi[1]])
+                    det_norm = np.sum(spectrum_diff[norm_roi[0]:norm_roi[1]])
+                    bkg_sub = np.zeros(1024, dtype=np.int32)
+                    if det_norm > 0:
+                        bkg_sub = bkg_norm / det_norm * spectrum_diff - bkg
+                else:
+                    bkg_sub = spectrum_diff - bkg * livetime_diff
                 spectrum_last = spectrum
                 livetime_last = livetime
                 c = np.sum(bkg_sub[args.sig0:args.sig1])
                 craw = np.sum(spectrum_diff[args.sig0:args.sig1])
                 counts = c if counts is None else c*args.alpha + counts*(1-args.alpha)
-                print(datetime.now(), '-', f'cs: {cspec:.1f} craw {craw} counts {counts:.1f}', flush=True)
+                print(datetime.now(), '-', f'cs: {cspec:.1f} craw {craw} counts {counts:.2f}', flush=True)
         except KeyboardInterrupt:
             print("User terminated run")
         base.stop()
@@ -645,11 +659,19 @@ if __name__ == "__main__":
             base.set_acq_mode_list()
             base.start()
             t0 = datetime.now()
-            while (datetime.now() - t0).total_seconds() < args.duration:
+            run_time = timedelta(seconds=args.duration)
+            fhits.write(b'DBLM\x00\x00\x00\x00')
+            fhits.write(pack('d', t0))
+            fhits.seek(16, os.SEEK_CUR)
+            while (elapsed_time := datetime.now() - t0) < run_time:
                 hits = base.hits
                 nhits += len(hits)
                 if len(hits) > 0: fhits.write(pack(f'{len(hits)}I', *hits))
+                print("Elapsed time: " + str(elapsed_time), end='\r')
             base.stop()
+            fhits.seek(16, os.SEEK_SET)
+            fhits.write(pack('d', base.livetime))
+            fhits.write(pack('d', base.realtime))
         print(f"Collected {nhits} hits")
         print(f"Livetime {base.livetime:.3f} s")
         print(f"Realtime {base.realtime:.3f} s")
