@@ -661,7 +661,7 @@ if __name__ == "__main__":
             t0 = datetime.now()
             run_time = timedelta(seconds=args.duration)
             fhits.write(b'DBLM\x00\x00\x00\x00')
-            fhits.write(pack('d', t0))
+            fhits.write(pack('d', t0.timestamp()))
             fhits.seek(16, os.SEEK_CUR)
             while (elapsed_time := datetime.now() - t0) < run_time:
                 hits = base.hits
@@ -669,6 +669,7 @@ if __name__ == "__main__":
                 if len(hits) > 0: fhits.write(pack(f'{len(hits)}I', *hits))
                 print("Elapsed time: " + str(elapsed_time), end='\r')
             base.stop()
+            print("Elapsed time: " + str(elapsed_time))
             fhits.seek(16, os.SEEK_SET)
             fhits.write(pack('d', base.livetime))
             fhits.write(pack('d', base.realtime))
