@@ -100,6 +100,7 @@ if args.graph:
     import matplotlib.pyplot as plt
     mpl.rcParams['font.family'] = 'sans-serif'
     plt.style.use('dark_background')
+    plt.rcParams['xtick.labelsize'] = 8
     fig = plt.figure(figsize=(7,4))
     ax  = fig.add_subplot()
     ax.grid(True, color='green', linestyle='dashed', linewidth=0.75)
