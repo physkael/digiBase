@@ -56,7 +56,7 @@ from struct import pack, unpack
 import logging
 from enum import Enum
 
-__version__ = '0.3.1'
+__version__ = '0.3.2'
 
 # FIX THIS - I followed what libdbaseRH was doing
 # and it's really convoluted. 
