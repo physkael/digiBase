@@ -160,10 +160,24 @@ class ExtGateMode(Enum):
 class digiBase:
     VENDOR_ID: int  = 0x0a2d
 
-    def __init__(self):
+    def __init__(self, serialNumber=None):
 
         self.log = logging.getLogger('digiBase')
-        self.dev = usb.core.find(idVendor=digiBase.VENDOR_ID)
+        self.dev = None
+
+        if serialNumber is None:
+            self.dev = usb.core.find(idVendor=digiBase.VENDOR_ID)
+        else:
+            # Find all devices and match serial number
+            if not isinstance(serialNumber, str): serialNumber = str(serialNumber)
+            for dev in usb.core.find(idVendor=digiBase.VENDOR_ID, find_all=True):
+                sn = dev.serial_number.strip('\x00')
+                self.log.debug(f'Bus {dev.bus:03d} Device {dev.address:03d}: '
+                               f'ID {dev.idVendor:04x}:{dev.idProduct:04x} '
+                               ' S/N', sn)
+                if sn == serialNumber:
+                    self.dev = dev
+                    break
 
         if self.dev is None: raise ValueError("Device not found")
         self.log.info(f'Found ORTEC digiBase device {self.dev.idVendor:04x}:{self.dev.idProduct:04x}')
@@ -184,10 +198,7 @@ class digiBase:
             needs_init = (r[0] == 0)
 
         if needs_init:
-            if 'DBASE_FIRMWARE' in os.environ:
-                firmware_path = os.environ['DBASE_FIRMWARE']
-            else:
-                firmware_path = './digiBase' + ('RH' if self.isRH else '') + '.rbf'
+            firmware_path = self._find_firmware()
             with open(firmware_path, 'rb') as f:
                 fw = f.read()
             if self.isRH:
@@ -250,6 +261,16 @@ class digiBase:
             self.write_status_register()
         
         self.read_status_register()
+
+    def _find_firmware(self):
+        from pathlib import Path
+        key = 'DIGIBASE_FIRMWARE_PATH'
+        search = os.environ[key].split(':') if key in os.environ else \
+            [os.path.expanduser('~/.digiBase'), '.']
+        for p in search:
+            path_to_fw = Path(p) / ('digiBase' + ('RH' if self.isRH else '') + '.rbf')
+            if path_to_fw.is_file(): return path_to_fw
+        raise RuntimeError("Unable to find digiBase Firmware")
         
     def read_status_register(self):
         self._status = bit_register(
@@ -356,7 +377,7 @@ class digiBase:
     @property
     def hv_enabled(self):
         self.read_status_register()
-        return self._status[6]
+        return bool(self._status[6])
     
     @hv_enabled.setter
     def hv_enabled(self, val: bool):
@@ -401,11 +422,13 @@ class digiBase:
     @property
     def hv_readback(self):
         # Trigger HV ADC read
+        self._status[610] = 0
+        self.write_status_register()
         self._status[610] = 1
         self.write_status_register()
         sleep(0.01)
         self.read_status_register()
-        return self._status[24:32] | (self._status[13:15] << 8)
+        return (self._status[24:32] | (self._status[13:15] << 8)) * 1.25
     
     @property
     def lld(self):
