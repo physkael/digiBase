@@ -56,7 +56,7 @@ from struct import pack, unpack
 import logging
 from enum import Enum
 
-__version__ = '0.3.2'
+__version__ = '0.3.3'
 
 # FIX THIS - I followed what libdbaseRH was doing
 # and it's really convoluted. 
@@ -451,14 +451,14 @@ class digiBase:
     @property
     def fine_gain(self) -> float:
         self.read_status_register()
-        return self._status[128:152] / 0x200000 * 0.5
+        return self._status[96:128] / 0x400000
     
     @fine_gain.setter
     def fine_gain(self, val: float):
         if val < 0.25 or val >= 2.0:
             raise ValueError("Fine gain out of range [0.25, 2.0)")
         # The fine gain really does appear to be a 23-bit value
-        val = int(val / 0.5 * 0x200000)
+        val = int(val * 0x400000)
         # Set high bit to 1 to active register write
         # On read the bit should be cleared
         self._status[128:152] = val | 0x800000
@@ -562,6 +562,7 @@ if __name__ == "__main__":
     parser.add_argument('-g', '--gain', type=float, default=0.5)
     parser.add_argument('--realtime-preset', type=float, default=0.0)
     parser.add_argument('--livetime-preset', type=float, default=0.0)
+    parser.add_argument('--sn', help='S/N of digiBase (in case of >1)')
 
     parser.add_argument('-L', '--log-level', nargs='?', default='WARNING', const='INFO')
 
@@ -589,7 +590,7 @@ if __name__ == "__main__":
     logging.basicConfig(level=args.log_level)
     log = logging.getLogger()
 
-    base = digiBase()
+    base = digiBase(args.sn)
 
     # Configure the device to sane defaults    
     base.clear_spectrum()
