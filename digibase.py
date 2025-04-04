@@ -56,7 +56,7 @@ from struct import pack, unpack
 import logging
 from enum import Enum
 
-__version__ = '0.3.3'
+__version__ = '0.3.4'
 
 # FIX THIS - I followed what libdbaseRH was doing
 # and it's really convoluted. 
@@ -563,7 +563,7 @@ if __name__ == "__main__":
     parser.add_argument('--realtime-preset', type=float, default=0.0)
     parser.add_argument('--livetime-preset', type=float, default=0.0)
     parser.add_argument('--sn', help='S/N of digiBase (in case of >1)')
-
+    parser.add_argument('-q', '--quiet', action='store_true')
     parser.add_argument('-L', '--log-level', nargs='?', default='WARNING', const='INFO')
 
     subparsers = parser.add_subparsers(dest='command', help='Run modes')
@@ -619,14 +619,15 @@ if __name__ == "__main__":
         t0 = datetime.now()
         run_time = timedelta(seconds=args.duration)
         while (elapsed_time := datetime.now() - t0) < run_time:
-            print("Elapsed time: " + str(elapsed_time), end='\r')
+            if not args.quiet: print("Elapsed time: " + str(elapsed_time), end='\r')
             sleep(0.1)
         base.stop()
-        print("Elapsed time: " + str(elapsed_time))
         spectrum = np.array(base.spectrum, dtype=np.uint32)
-        print(f"Collected {np.sum(spectrum)} counts")
-        print(f"Livetime {base.livetime:.3f} s")
-        print(f"Realtime {base.realtime:.3f} s")
+        if not args.quiet: 
+            print("Elapsed time: " + str(elapsed_time))
+            print(f"Collected {np.sum(spectrum)} counts")
+            print(f"Livetime {base.livetime:.3f} s")
+            print(f"Realtime {base.realtime:.3f} s")
         write_background(args.filename, spectrum, base.livetime, args.comment)
     elif args.command == 'detect':
         base.set_acq_mode_pha()
@@ -691,12 +692,13 @@ if __name__ == "__main__":
                 hits = base.hits
                 nhits += len(hits)
                 if len(hits) > 0: fhits.write(pack(f'{len(hits)}I', *hits))
-                print("Elapsed time: " + str(elapsed_time), end='\r')
+                if not args.quiet: print("Elapsed time: " + str(elapsed_time), end='\r')
             base.stop()
-            print("Elapsed time: " + str(elapsed_time))
+            if not args.quiet: print("Elapsed time: " + str(elapsed_time))
             fhits.seek(16, os.SEEK_SET)
             fhits.write(pack('d', base.livetime))
             fhits.write(pack('d', base.realtime))
-        print(f"Collected {nhits} hits")
-        print(f"Livetime {base.livetime:.3f} s")
-        print(f"Realtime {base.realtime:.3f} s")
+        if not args.quiet:
+            print(f"Collected {nhits} hits")
+            print(f"Livetime {base.livetime:.3f} s")
+            print(f"Realtime {base.realtime:.3f} s")
