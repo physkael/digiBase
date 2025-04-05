@@ -82,9 +82,10 @@ will provide help on the various commands and options it supports.
 
 ### Python Module
 
-This currently only supports one device so if you have multiple devices connected to the USB bus, 
-it will connect to the first one found according to the pyusb documentation. This may be 
-non deterministic behavior.
+As of version 0.3.1, multiple devices are supported and can be readout simultanesously.
+If you don't specify a serial number as argument to instance creation, it will connect 
+to the first one found according to the pyusb documentation. This may be 
+non deterministic behavior:
 
 ```python
 from digibase import digiBase, ExtGateMode
@@ -93,7 +94,14 @@ base = digiBase()
 print('Opened digiBase, serial number', base.serial)
 ```
 
-should open the device and provide a serial number. 
+should open the device and provide a serial number. If you provide a serial number as
+a string or an integer, it will search for and connect only to the device with that
+serial number:
+
+```python
+base_a = digiBase(12)
+base_b = digiBase(1830)
+```
 
 ### Configuration
 At this point I don't specify the configuration of the device at power-up, and as far as
@@ -113,6 +121,10 @@ set the `hv_enabled` property to `False`:
 ```python
 base.hv_enabled = False
 ```
+
+Electro-optical gain for photomultipliers typically behaves as 
+$G = G_0 \left(\frac{V}{V_0}\right)^p$ where $p\sim 5-8$. 
+It will depend on what's plugged into the socket.
 
 #### Livetime and Realtime Counters and Presetting Acquisition Time
 The digiBASE contains counters to separately track realtime and livetime. 
@@ -209,7 +221,7 @@ spectrum = base.spectrum
 which returns a python list of integers of length 1024.
 
 ### List Mode Acquisition
-The so-called _list mode_ acquisition is a powerful feature of the digiBASE. Instead of 
+The _list mode_ acquisition is a powerful feature of the digiBASE. Instead of 
 having logic on the base fill histogram bins with the ADC values you get the individual 
 PMT hits themselves along with microsecond-level timestamps. To invoke list mode 
 instead of PHA:
