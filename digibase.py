@@ -55,8 +55,9 @@ import numpy as np
 from struct import pack, unpack
 import logging
 from enum import Enum
+from typing import Any
 
-__version__ = '0.3.4'
+__version__ = '0.3.5'
 
 # FIX THIS - I followed what libdbaseRH was doing
 # and it's really convoluted. 
@@ -535,24 +536,38 @@ class digiBase:
             usb.util.dispose_resources(self.dev)
 
 
-def write_background(filename, s:np.ndarray, exposure:float, comment:str):
+def write_background(filename, s:np.ndarray, exposure:float, comment:str, serial:int):
+    global args
     with open(filename, 'wb') as f:
-        f.write(b'DBKG\x00\x00\x00\x00')
+        f.write(b'DBKG\x00\x00\x00\x01')
         f.write(pack('d', datetime.now().timestamp()))
         f.write(pack('d', exposure))
+        f.write(pack('i', serial))
+        f.write(pack('H', args.pmt_hv))
+        f.write(pack('H', args.disc))
+        f.write(pack('i', ExtGateMode[args.external_gate].value))
+        f.write(pack('d', args.gain))
         if comment is None:
             f.write(b'\x00'*64)
         else:
             f.write(comment.encode('utf-8')[:63].ljust(64, b'\x00'))
         s.tofile(f)
 
-def read_background(filename) -> tuple[np.ndarray, float, float, str]:
-    with open(filename, 'rb') as f:
-        if f.read(8) != b'DBKG\x00\x00\x00\x00': raise ValueError("Unknown file format")
-        t, exp = unpack('2d', f.read(16))
-        comment = f.read(64).decode('utf-8')
-        s = np.fromfile(f, dtype=np.int32)
-        return s, t, exp, comment
+def read_spectrum(fileobj) -> tuple[np.ndarray, float, float, object]:
+    """ More modern version to read spectrum file given file-like object"""
+    if fileobj.read(6) != b'DBKG\x00\x00': raise ValueError("Unknown file format")
+    ver, = unpack('H', fileobj.read(2))
+    t, exp = unpack('2d', fileobj.read(16))
+    if ver > 0:
+        serial, hv, disc, ext_gate, gain = unpack('i2Hid', fileobj.read(20))
+    comment = fileobj.read(64).decode('utf-8')
+    s = np.array(unpack('1024i', fileobj.read(4096)), 'i')
+    if ver == 0: return s, t, exp, comment
+    return s, t, exp, (comment, serial, hv, disc, ext_gate, gain)
+
+def read_background(filename) -> tuple[np.ndarray, float, float, Any]:
+    """Legacy interface to spectrum reader"""
+    with open(filename, 'rb') as f: return read_spectrum(f)
     
 if __name__ == "__main__":
     parser = ArgumentParser(prog='digibase.py', description='Simple DAQ for ORTEC/AMETEK digiBase')

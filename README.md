@@ -39,6 +39,7 @@ Python 3.8+ is required. Additionally, it depends on the following packages:
 * pyusb
 * NumPy
 * pytest (optional, to run unit tests)
+* <font color="red">digiBASE firmware (see following section).</font>
 
 ## Installation
 Digibase is now a Python package on PyPI and is most easily installed using `pip`:
@@ -57,7 +58,7 @@ file in the current working directory or set the environment variable
 
 ### USB Device Permission (Linux)
 Under Linux the module may fail to open the USB device due to lack of permission. 
-While it's always possible to `sudo chown 666 /dev/bus/usb/xxx/yyy` it will likely
+While it's always possible to `sudo chmod 666 /dev/bus/usb/xxx/yyy` it will likely
 be reset across power off or even after unplugging and plugging the device back in.
 The better solution in this case is to add a custom udev rule:
 
@@ -78,7 +79,8 @@ background-subtracted gamma detection.
 ```bash
 $ python -m digibase --help
 ```
-will provide help on the various commands and options it supports.
+will provide help on the various commands and options it supports. There are two 
+modes that this script supports: (1) spectrum capture and (2) list-mode acquisition
 
 ### Python Module
 
