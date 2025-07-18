@@ -559,7 +559,7 @@ def read_spectrum(fileobj) -> tuple[np.ndarray, float, float, object]:
     ver, = unpack('H', fileobj.read(2))
     t, exp = unpack('2d', fileobj.read(16))
     if ver > 0:
-        serial, hv, disc, ext_gate, gain = unpack('i2Hid', fileobj.read(20))
+        serial, hv, disc, ext_gate, gain = unpack('=i2Hid', fileobj.read(20))
     comment = fileobj.read(64).decode('utf-8')
     s = np.array(unpack('1024i', fileobj.read(4096)), 'i')
     if ver == 0: return s, t, exp, comment
