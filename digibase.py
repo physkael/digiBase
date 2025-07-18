@@ -650,7 +650,10 @@ if __name__ == "__main__":
                 t1 = datetime.now()
                 iseq += 1
             if not args.quiet: print("Elapsed time: " + str(elapsed_time), end='\r')
-            sleep(0.01)
+            sleeptime = (interval - (datetime.now() - t1)) / timedelta(seconds=1.0)
+            if sleeptime > 0.0:
+                sleeptime = min(sleeptime, 0.25)
+                sleep(sleep)
         base.stop()
         spectrum = base.spectrum
         if not args.quiet: 
