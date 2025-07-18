@@ -639,7 +639,7 @@ if __name__ == "__main__":
         interval = timedelta(seconds=args.interval)
         iseq = 0
         while (elapsed_time := datetime.now() - t0) < run_time:
-            if interval > 0 and datetime.now() - t1 > interval:
+            if interval > timedelta(0.0) and datetime.now() - t1 > interval:
                 filename = args.filename.format(iseq, base.serial)
                 base.stop()
                 spectrum = base.spectrum
