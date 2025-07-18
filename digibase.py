@@ -653,7 +653,7 @@ if __name__ == "__main__":
             sleeptime = (interval - (datetime.now() - t1)) / timedelta(seconds=1.0)
             if sleeptime > 0.0:
                 sleeptime = min(sleeptime, 0.25)
-                sleep(sleep)
+                sleep(sleeptime)
         base.stop()
         spectrum = base.spectrum
         if not args.quiet: 
