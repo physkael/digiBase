@@ -57,7 +57,7 @@ import logging
 from enum import Enum
 from typing import Any
 
-__version__ = '0.3.5'
+__version__ = '0.3.6'
 
 # FIX THIS - I followed what libdbaseRH was doing
 # and it's really convoluted. 
@@ -536,7 +536,7 @@ class digiBase:
             usb.util.dispose_resources(self.dev)
 
 
-def write_background(filename, s:np.ndarray, exposure:float, comment:str, serial:int):
+def write_background(filename, s:array, exposure:float, comment:str, serial:int):
     global args
     with open(filename, 'wb') as f:
         f.write(b'DBKG\x00\x00\x00\x01')
@@ -551,7 +551,7 @@ def write_background(filename, s:np.ndarray, exposure:float, comment:str, serial
             f.write(b'\x00'*64)
         else:
             f.write(comment.encode('utf-8')[:63].ljust(64, b'\x00'))
-        s.tofile(f)
+        f.write(pack('1024i', *s))
 
 def read_spectrum(fileobj) -> tuple[np.ndarray, float, float, object]:
     """ More modern version to read spectrum file given file-like object"""
@@ -586,6 +586,8 @@ if __name__ == "__main__":
     parser_spe.add_argument('duration', type=float, help='Time, in seconds to integrate spectrum')
     parser_spe.add_argument('filename', help='Output file in which spectrum is saved')
     parser_spe.add_argument('-m', '--comment', help='Short run description (max 63 char)')
+    parser_spe.add_argument('-I', '--interval', type=float, default=0.0, 
+                            help='Slice spectral captures into intervals, if > 0')
 
     parser_det = subparsers.add_parser('detect', help='Detect presence of signal over background')
     parser_det.add_argument('duration', type=float, help='Integration time of each query interval')
@@ -632,18 +634,33 @@ if __name__ == "__main__":
         base.set_acq_mode_pha()
         base.start()
         t0 = datetime.now()
+        t1 = t0
         run_time = timedelta(seconds=args.duration)
+        interval = timedelta(seconds=args.interval)
+        iseq = 0
         while (elapsed_time := datetime.now() - t0) < run_time:
+            if interval > 0 and datetime.now() - t1 > interval:
+                filename = args.filename.format(iseq, base.serial)
+                base.stop()
+                spectrum = base.spectrum
+                livetime = base.livetime
+                base.start()
+                write_background(filename, spectrum, livetime,
+                                 args.comment, serial=base.serial)
+                t1 = datetime.now()
+                iseq += 1
             if not args.quiet: print("Elapsed time: " + str(elapsed_time), end='\r')
-            sleep(0.1)
+            sleep(0.01)
         base.stop()
-        spectrum = np.array(base.spectrum, dtype=np.uint32)
+        spectrum = base.spectrum
         if not args.quiet: 
             print("Elapsed time: " + str(elapsed_time))
-            print(f"Collected {np.sum(spectrum)} counts")
+            print(f"Collected {sum(spectrum)} counts")
             print(f"Livetime {base.livetime:.3f} s")
             print(f"Realtime {base.realtime:.3f} s")
-        write_background(args.filename, spectrum, base.livetime, args.comment)
+        filename = args.filename.format(iseq, base.serial)
+        write_background(filename, spectrum, base.livetime, 
+                         args.comment, serial=base.serial)
     elif args.command == 'detect':
         base.set_acq_mode_pha()
         base.start()
