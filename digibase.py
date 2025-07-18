@@ -646,7 +646,7 @@ if __name__ == "__main__":
                 livetime = base.livetime
                 base.start()
                 write_background(filename, spectrum, livetime,
-                                 args.comment, serial=base.serial)
+                                 args.comment, serial=int(base.serial))
                 t1 = datetime.now()
                 iseq += 1
             if not args.quiet: print("Elapsed time: " + str(elapsed_time), end='\r')
@@ -660,7 +660,7 @@ if __name__ == "__main__":
             print(f"Realtime {base.realtime:.3f} s")
         filename = args.filename.format(iseq, base.serial)
         write_background(filename, spectrum, base.livetime, 
-                         args.comment, serial=base.serial)
+                         args.comment, serial=int(base.serial))
     elif args.command == 'detect':
         base.set_acq_mode_pha()
         base.start()
