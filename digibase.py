@@ -57,7 +57,7 @@ import logging
 from enum import Enum
 from typing import Any
 
-__version__ = '0.3.6'
+__version__ = '0.3.7'
 
 # FIX THIS - I followed what libdbaseRH was doing
 # and it's really convoluted. 
@@ -583,8 +583,16 @@ if __name__ == "__main__":
 
     subparsers = parser.add_subparsers(dest='command', help='Run modes')
     parser_spe = subparsers.add_parser('spect', help='Acquire spectrum, write to file')
-    parser_spe.add_argument('duration', type=float, help='Time, in seconds to integrate spectrum')
-    parser_spe.add_argument('filename', help='Output file in which spectrum is saved')
+    parser_spe.add_argument('duration', type=float, 
+                            help='Time, in seconds to integrate spectrum')
+    parser_spe.add_argument('filename', 
+                            help='Output file in which spectrum is saved; ' 
+                            'note can contain bracketed expressions {seq} '
+                            'and {serial} which will be replaced by the '
+                            'current sequence of a multi-sequence run '
+                            '(triggered by -I option), and the digiBase '
+                            'S/N, respectively.'
+                            )
     parser_spe.add_argument('-m', '--comment', help='Short run description (max 63 char)')
     parser_spe.add_argument('-I', '--interval', type=float, default=0.0, 
                             help='Slice spectral captures into intervals, if > 0')
@@ -640,7 +648,7 @@ if __name__ == "__main__":
         iseq = 0
         while (elapsed_time := datetime.now() - t0) < run_time:
             if interval > timedelta(0.0) and datetime.now() - t1 > interval:
-                filename = args.filename.format(iseq, base.serial)
+                filename = args.filename.format(seq=iseq, serial=base.serial)
                 base.stop()
                 spectrum = base.spectrum
                 livetime = base.livetime

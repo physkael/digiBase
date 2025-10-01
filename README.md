@@ -52,9 +52,14 @@ which should install the project and all dependencies.
 Device firmware must be loaded at power up. ORTEC distributes this firmware with
 their MAESTRO and Connection software. You may find this in the distribution media
 or in the install directories of the aforementioned software, in `\WINDOWS`, or 
-in `\WINDOWS\SYSTEM32` with filename `digiBase.rbf` or `digiBaseRH.rbf`. Place this
-file in the current working directory or set the environment variable 
-`DBASE_FIRMWARE` to point to the file.
+in `\WINDOWS\SYSTEM32` with filename `digiBase.rbf` (or `digiBaseRH.rbf` which
+is needed for older versions of the hardware, identified with USB Product ID
+0x001f). 
+This file or these files may be located:
+
+- in the current working directory,
+- a directory pointed to by the `DIGIBASE_FIRMWARE_PATH` environment variable, or
+- in `~/.digiBase`
 
 ### USB Device Permission (Linux)
 Under Linux the module may fail to open the USB device due to lack of permission. 
@@ -63,16 +68,15 @@ be reset across power off or even after unplugging and plugging the device back 
 The better solution in this case is to add a custom udev rule:
 
 ```bash
-sudo echo <<EOF > /etc/udev/rules.d/50-usb-perms.rules
+sudo tee /etc/udev/rules.d/50-usb-perms.rules <<EOF > /dev/null
 SUBSYSTEM=="usb", ATTRS{idVendor}=="0a2d", GROUP="users", MODE="0666"
 EOF
 ```
 
 ## Basic Usage
-This project is primarily intended to be used as a library module that can be combined 
-with other Python frameworks such as NumPy, SciPy, and matplotlib to realize 
-data analysis and visualization pipelines for scintillator-based radiation detectors.
-The module may also be invoked from the command line to perform a limited set of
+
+### Command line invocation
+The module may be invoked from the command line to perform a limited set of
 functions: collection of MCA spectra and list-mode PMT hits to a data file and 
 background-subtracted gamma detection.
 
@@ -80,10 +84,27 @@ background-subtracted gamma detection.
 $ python -m digibase --help
 ```
 will provide help on the various commands and options it supports. There are two 
-modes that this script supports: (1) spectrum capture and (2) list-mode acquisition
+modes that this script supports: (1) spectrum capture and (2) list-mode acquisition.
+
+One particularly handy use case which has been added as of 0.3.6 is the ability
+to capture sequences of spectra using the `spect` mode with the `-I` or `--interval`
+switch. In this case the filename _must_ include the string `{seq}` or the individual
+time slices will overwrite one another. `{serial}` may also be included in the
+filename which will automatically be replaced by the serial number of the digiBase.
+For example, if you would like to capture 10 15-second long spectra from a base with
+serial number 4886:
+
+```bash
+$ python -m digibase --hv 833 --disc 57 --sn 4886 \
+  spect -I 15 150 capture-{serial}-{seq:04d}.dat
+```
+
+Note the use of specific integer formatting to pad the sequence # with 0's.
 
 ### Python Module
-
+As well, the digiBase module may be used as a library module that can be combined 
+with other Python frameworks such as NumPy, SciPy, and matplotlib to realize 
+data analysis and visualization pipelines for scintillator-based radiation detectors.
 As of version 0.3.1, multiple devices are supported and can be readout simultanesously.
 If you don't specify a serial number as argument to instance creation, it will connect 
 to the first one found according to the pyusb documentation. This may be 
